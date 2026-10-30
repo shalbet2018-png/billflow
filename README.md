@@ -64,16 +64,23 @@ outputs:
 - A client with a missing/invalid address or a failed send is reported and skipped; the others continue.
 ## Desktop screen
 
-Start menu / desktop shortcut **BILLFLOW** (or `billflow gui`) opens a cyberpunk-styled window: choose a config
-(or press **DEMO** for sample data), type the month, **PREVIEW**, then **EXECUTE** and confirm. Nothing is written until you
-confirm, and the screen never sends emails or pushes to online systems - use the command line with `--send-emails` / `--push` for that.
+Start menu / desktop shortcut **BILLFLOW** (or `billflow gui`) opens the main screen, numbered in the order it is used:
+**1** choose your business setup (remembered; **New setup**, **Change my setup** or **Try with sample data**), **2** choose the
+month from a list, **3 Check invoices**, **4 Create invoices** (enabled only after a check of that setup and month) and confirm.
+Every problem is shown in plain words with a *What to do* line and a link to open the file concerned; a bar at the bottom
+always says what to do next. **Enter licence key** installs a key without the command line. **Plain look / Neon look**
+switches between a plain office style and the original cyberpunk style (remembered). The screen never sends emails or pushes
+to online systems - use the command line with `--send-emails` / `--push` for that.
 
 ## Setup wizard
 
-`billflow setup` (or SETUP WIZARD on the screen) lets a business describe its needs, link its own client list, readings and
-extra-bill files (month names in file names become patterns), choose outputs, test, and save a `config.yml`. For scripts:
-`billflow setup --answers answers.json --folder C:\path`. The free-text "what you need" note is stored in `needs:` as a
-record; it is not interpreted. See `docs\GUIDE.md` for the plain-language business guide.
+`billflow setup` (or **New setup** on the screen) lets a business tick what it bills, link its own client list, readings and
+extra-bill files (month names in file names become patterns), add charges (amounts are checked as numbers; percentages apply
+to every charge above or to ticked ones), choose outputs, test, and save a `config.yml`. The answers are also saved as
+`setup-answers.json` next to it, so **Change my setup** reopens the wizard with everything filled in (older or hand-written
+configs are read back from `config.yml`; parts the wizard cannot show are listed before saving). For scripts:
+`billflow setup --answers answers.json --folder C:\path`. The optional notes field is stored in `needs:` as a record; it is not
+interpreted. See `docs\GUIDE.md` for the plain-language business guide.
 
 ## Accounting systems
 

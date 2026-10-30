@@ -1,3 +1,4 @@
+import os
 from decimal import Decimal
 
 import pytest
@@ -22,13 +23,13 @@ def answers(ws, **over):
     d = str(ws)
     a = {"company": "Acme Ltd", "currency": "USD", "payment_terms": "Pay in 7 days",
          "needs": "We bill rent, water by meter and extra power bills.",
-         "clients": {"file": d + r"\clients.csv", "id_column": "id", "name_column": "name", "last_invoice_column": "last_invoice",
+         "clients": {"file": os.path.join(d, "clients.csv"), "id_column": "id", "name_column": "name", "last_invoice_column": "last_invoice",
                      "email_column": "email"},
          "charges": [
              {"kind": "fixed", "name": "Service Charge", "column": "service_charge"},
-             {"kind": "metered", "name": "Water Bill", "file": d + r"\readings-{period}.csv", "key": "id",
+             {"kind": "metered", "name": "Water Bill", "file": os.path.join(d, "readings-{period}.csv"), "key": "id",
               "current_column": "current", "previous_column": "previous", "rate_column": "water_rate"},
-             {"kind": "extra", "name": "Power Bill", "file": d + r"\power-{period}.csv", "key": "id",
+             {"kind": "extra", "name": "Power Bill", "file": os.path.join(d, "power-{period}.csv"), "key": "id",
               "amount_column": "amount", "description_column": "description"}],
          "outputs": {"pdf": True, "starter_template": True, "ledger_xlsx": True}}
     a.update(over)
@@ -160,3 +161,94 @@ def test_flat_amount_vat_and_xlsx_sheet_pattern(ws, tmp_path):
     cfg = wizard.write_config(a, ws / "mine")
     res = {r.client_id: r for r in plan(load_config(cfg), "2026-11")}
     assert res["H1"].invoice.total == Decimal("1276.00")                  # (1000 + 10 x 10) x 1.16
+
+
+def test_setup_can_be_reopened_and_changed(ws):
+    a = answers(ws)
+    path = wizard.write_config(a, ws / "mine")
+    back, unsupported = wizard.load_answers(path)
+    assert back == a and unsupported == []                                # wizard-made: exact answers come back
+    (ws / "mine" / wizard.ANSWERS_FILE).unlink()
+    back, unsupported = wizard.load_answers(path)                         # hand-made / older setups: read from config
+    assert [c["kind"] for c in back["charges"]] == ["fixed", "metered", "extra"] and unsupported == []
+    assert back["clients"]["id_column"] == "id" and back["outputs"]["pdf"]
+    res = {r.client_id: r for r in plan(load_config(wizard.write_config(back, ws / "again")), "2026-11")}
+    assert res["H1"].invoice.total == Decimal("6340.00")
+
+
+def test_starter_template_is_not_overwritten_when_setup_is_saved_again(ws):
+    path = wizard.write_config(answers(ws), ws / "mine")
+    tpl = ws / "mine/invoice_template.docx"
+    tpl.write_bytes(b"edited by the business")
+    wizard.write_config(answers(ws), ws / "mine")
+    assert tpl.read_bytes() == b"edited by the business"
+
+
+def test_plain_explanations():
+    from billflow.friendly import explain, month_label
+    assert month_label("2026-11") == "November 2026"
+    e = explain("Reading went down (830 -> 817)", client_id="H1")
+    assert "went down" in e.text and "817" in e.text and "H1" in e.fix
+    e = explain("File not found: /x/data/Readings 2026-12.xlsx", period="2026-12")
+    assert "December 2026" in e.text and "Readings 2026-12.xlsx" in e.fix
+    assert "billed twice" in explain("Already invoiced for 2026-11").text
+    assert "number" in explain("current reading is not a number: 'abc'", client_id="H1").fix
+    assert explain("something brand new").fix                             # unknown messages still get a next step
+
+
+def _wiz(root):
+    from billflow.wizard_gui import Wizard
+    return Wizard(root)
+
+
+def test_charge_dialog_checks_numbers_and_uses_tick_boxes_for_percentages(ws):
+    tk = pytest.importorskip("tkinter")
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display")
+    root.withdraw()
+    from billflow.wizard_gui import ChargeDialog
+    w = _wiz(root)
+    try:
+        w.charges = [{"kind": "fixed", "name": "Rent", "amount": "1000"}, {"kind": "fixed", "name": "Garbage", "amount": "200"}]
+        d = ChargeDialog(w)
+        d.name.set("Service"); d.amount.set("")
+        d.ok(); assert "number" in d.err["text"] and d.result is None
+        d.name.set("rent"); d.amount.set("500")
+        d.ok(); assert "already a charge" in d.err["text"]
+        d.destroy()
+        d = ChargeDialog(w)
+        d.kind.set("percentage"); d.rebuild()
+        assert set(d.ticks) == {"Rent", "Garbage"}
+        d.name.set("VAT"); d.pct.set("16"); d.scope.set("some")
+        d.ok(); assert "Tick at least one" in d.err["text"]
+        d.ticks["Rent"].set(True); d.ok()
+        assert d.result == {"kind": "percentage", "name": "VAT", "percent": "16", "of": "Rent"}
+        e = ChargeDialog(w, d.result, earlier=["Rent", "Garbage"])            # editing brings the ticks back
+        assert e.scope.get() == "some" and e.ticks["Rent"].get() and not e.ticks["Garbage"].get()
+        e.destroy()
+    finally:
+        w.win.destroy(); root.destroy()
+
+
+def test_wizard_edit_mode_keeps_chosen_columns(ws):
+    tk = pytest.importorskip("tkinter")
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display")
+    root.withdraw()
+    from billflow.wizard_gui import Wizard
+    a = answers(ws)
+    a["clients"]["email_column"] = ""                                     # deliberately no email column
+    path = wizard.write_config(a, ws / "mine")
+    w = Wizard(root, config_path=path)
+    try:
+        assert w.editing and w.company.get() == "Acme Ltd" and len(w.charges) == 3
+        w.next(); w.next(); assert w.step == 2
+        assert w.id_menu.value() == "id" and w.email_menu.value() == ""     # not re-guessed over the saved choice
+        w.next(); w.next(); w.next(); assert w.step == 5
+        assert w.collect()["charges"] == a["charges"]
+    finally:
+        w.win.destroy(); root.destroy()

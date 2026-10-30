@@ -13,22 +13,26 @@ BILLFLOW prepares your monthly invoices and client ledgers from the files you al
 
 1. Run `billflow-setup-0.1.0.exe` and follow the steps.
 2. Open BILLFLOW from the Start menu. You will see the main screen.
-3. To enter your licence key, run `billflow license install YOUR-KEY`. The main screen shows the licence status.
+3. Press Enter licence key (top right), paste the key we sent you (or press Open key file...), then Save key. The top right of the screen shows your licence.
+4. Want to look around first? Press Try with sample data, then Check invoices. It uses made-up clients.
 
 ## 3. Tell BILLFLOW about your business (the Setup Wizard)
 
-Press SETUP WIZARD on the main screen. It asks six things, in plain language.
+Press New setup on the main screen. It asks six things, in plain language.
 
-1. Your business: company name, currency, the payment details printed on invoices, and the month your example files are for.
-2. What you need: describe in your own words what you bill and what should happen each month, then tick the kinds of charges you have. Your words are saved with the setup as a record. The ticked boxes and the questions that follow are what actually build your setup. Something unusual can be added as a custom rule - ask us.
-3. Client list: choose your client file. BILLFLOW reads its column names and shows them in drop-downs. Pick the columns holding the client ID, name, email, and last invoice number.
+1. Your business: company name, currency, the payment details printed on invoices, and the month of the files you are about to pick.
+2. What you bill: tick the kinds of charges you have. There is also a box for notes to yourself; it is only kept as a reminder and does not change how invoices are worked out. Something unusual can be added as a custom rule - ask us.
+3. Your client list: choose your client file. BILLFLOW reads its column names and shows them in drop-downs. Pick the columns holding the client ID, name and email. Only pick a "last invoice number" column if your list keeps each client's most recent invoice number (if H1's last invoice was 12, the next is H1/13); otherwise leave it as (none) and numbering starts at 1.
 4. Charges: add one line per charge, in the order they should appear on the invoice.
    - Fixed amount: the same for everyone, or taken from a column in your client list (rent, service charge).
    - Usage from meter readings: pick the readings file, the client-ID column, the current and previous reading columns, and a price per unit (or a rate column).
    - Extra bills: pick the file and the amount column. Several rows for one client are added together.
-   - Percentage: for example VAT, applied to all charges above it or to the ones you name.
-5. What to produce: PDF invoices, a Word invoice (your own template, or a starter we make for you), an Excel ledger per client, and a data file. Choose the folder for the results.
-6. Check and save: press RUN TEST to see every client's invoice for a month. Nothing is written during the test. Then save.
+   - Percentage: for example VAT, applied to every charge above it, or only to the charges you tick.
+   Amounts, prices and percentages must be plain numbers (1500 or 1500.50). To fix a charge later, select it and press Change selected (or double-click it).
+5. What to produce: PDF invoices, a Word invoice (a ready-made template, or your own), an Excel ledger per client, and a data file. Choose the folder for the results.
+6. Test and save: choose a month and press Run test to see every client's invoice. Nothing is written during the test. Then press Save setup.
+
+To change a setup later (a renamed column, a new charge, a different file), choose it in step 1 and press Change my setup. The wizard opens with your answers filled in; change what you need and save.
 
 ## 4. How to link the folders and files you need
 
@@ -40,12 +44,16 @@ So each month, you only need to save the new files with the month in the name, t
 
 ## 5. Your monthly routine
 
+The main screen is numbered in the order you use it, and the bar at the bottom always says what to do next.
+
 1. Save this month's files (readings, extra bills) into your folders.
-2. Open BILLFLOW. Choose your setup (the wizard fills this in) and type the month, for example 2026-11.
-3. Press PREVIEW. You see every client, their total, and anything flagged. Nothing is saved yet.
-4. Fix anything flagged in your source file and preview again.
-5. Press EXECUTE. BILLFLOW asks you to confirm, then writes the invoices, ledgers and a summary into a folder named for the month.
+2. Open BILLFLOW. In step 1, choose your setup (it remembers the last one). In step 2, choose the month from the list.
+3. Press Check invoices. You see every client, their total, and anything that needs attention, each with a "What to do" line and a link to open the file. Nothing is saved yet.
+4. Fix anything that needs attention in your file and press Check invoices again.
+5. Press Create invoices (it only works after a check). BILLFLOW asks you to confirm, then writes the invoices, ledgers and a summary into a folder named for the month, and offers to open it.
 6. Check a few invoices, then send them.
+
+Prefer a calmer screen? Press Plain look (top right). Neon look switches back. BILLFLOW remembers your choice.
 
 ## 6. Safety
 
@@ -58,7 +66,8 @@ So each month, you only need to save the new files with the month in the name, t
 
 ## 7. If something goes wrong
 
-- "File not found": the month pattern could not find a file for that month. Check the name and folder, including the month.
-- "Column not found": a column was renamed in your file. Run the wizard again, or edit config.yml.
-- A client is flagged: BILLFLOW lists the reason (for example a missing reading). Fix the source file and preview again.
+- Every problem is explained on screen with a "What to do" line. Most are fixed in your own file, then Check invoices again.
+- "Could not find the file": BILLFLOW looked for this month's file and it was not there. The message shows the exact name and folder it expects.
+- A column was renamed in your file, or a file moved: choose the setup and press Change my setup to pick it again.
+- "Create invoices" is greyed out: press Check invoices first (and again after changing the month).
 - Anything else: send us the message shown and your config.yml (without client data).

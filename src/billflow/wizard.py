@@ -4,6 +4,7 @@ The screen (wizard_gui.py) collects the answers; this module has no UI so it can
 """
 import calendar
 import csv
+import json
 import re
 from io import StringIO
 from pathlib import Path
@@ -236,18 +237,94 @@ def check_answers(a, period, base=None):
     return problems
 
 
+ANSWERS_FILE = "setup-answers.json"
+
+
 def write_config(a, folder):
-    """Writes config.yml (and a starter Word template if asked) into the folder. Returns the config path."""
+    """Writes config.yml (and a starter Word template if asked) into the folder. Returns the config path.
+    The answers are kept next to it (setup-answers.json) so the wizard can reopen and change the setup later."""
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
+    original = a
     a = {**a, "outputs": dict(a.get("outputs") or {})}
-    if a["outputs"].get("starter_template"):
-        from .sample import build_template
-        build_template(folder / "invoice_template.docx", (a.get("clients") or {}).get("email_column") or None)
+    if a["outputs"].get("starter_template") and not a["outputs"].get("docx_template"):
+        tpl = folder / "invoice_template.docx"
+        if not tpl.exists():                       # never overwrite a starter the business has already edited
+            from .sample import build_template
+            build_template(tpl, (a.get("clients") or {}).get("email_column") or None)
         a["outputs"]["docx_template"] = "invoice_template.docx"
     cfg = build_config(a)
     header = ("# Created by the billflow setup wizard. You can edit this file; see the README for every option.\n"
               "# {period} {month_name} {year} {month} in a file name or sheet name follow the month being billed.\n")
     path = folder / "config.yml"
     path.write_text(header + yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    (folder / ANSWERS_FILE).write_text(json.dumps(original, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
+
+
+def _file_of(cfg, s):
+    loc = s.get("url") or s.get("path") or ""
+    if loc and not loc.lower().startswith("http") and not Path(loc).is_absolute():
+        loc = str(Path(cfg.get("_dir", ".")) / loc)
+    return loc
+
+
+def answers_from_config(cfg):
+    """Best-effort reverse of build_config, for setups that were written by hand (no setup-answers.json).
+    Charges the wizard cannot show (plugins, tiers...) are reported in 'unsupported' and kept out of the answers."""
+    co, cl = cfg.get("company") or {}, cfg.get("clients") or {}
+    clients = {"file": _file_of(cfg, cl), "id_column": cl.get("id_column", "id"), "name_column": cl.get("name_column", ""),
+               "last_invoice_column": cl.get("last_invoice_column", "")}
+    for k in ("sheet", "header_row"):
+        if cl.get(k):
+            clients[k] = cl[k]
+    sources = cfg.get("sources") or {}
+    charges, unsupported = [], []
+    for ch in cfg.get("charges") or []:
+        rule, name = ch.get("rule"), ch.get("name", "")
+        src = sources.get(ch.get("source"), {})
+        link = {"file": _file_of(cfg, src), "key": src.get("key", "id"), **{k: src[k] for k in ("sheet", "header_row") if src.get(k)}}
+        if rule == "fixed":
+            d = {"kind": "fixed", "name": name, **({"column": ch["column"]} if ch.get("column") else {"amount": str(ch.get("amount", ""))})}
+            if ch.get("description"):
+                d["description"] = ch["description"]
+        elif rule == "metered" and src.get("type") in ("csv", "xlsx", "url_csv"):
+            d = {"kind": "metered", "name": name, **link, "current_column": ch.get("current_column", ""),
+                 "previous_column": ch.get("previous_column", ""),
+                 **({"rate_column": ch["rate_column"]} if ch.get("rate_column") else {"rate": str(ch.get("rate", ""))})}
+        elif rule == "adjustment" and src.get("type") in ("csv", "xlsx", "url_csv"):
+            d = {"kind": "extra", "name": name, **link, "amount_column": ch.get("amount_column", ""),
+                 "description_column": ch.get("description_column", ""), "required": bool(ch.get("required", False))}
+        elif rule == "percentage":
+            d = {"kind": "percentage", "name": name, "percent": str(ch.get("percent", "")), "of": ", ".join(ch.get("of") or [])}
+        else:
+            unsupported.append(name or rule)
+            continue
+        charges.append(d)
+    outs = {}
+    for o in cfg.get("outputs") or []:
+        t = o.get("type")
+        if t in ("pdf", "ledger_xlsx", "json"):
+            outs[t] = True
+        elif t == "docx" and o.get("template"):
+            outs["docx_template"] = _file_of(cfg, {"path": o["template"]})
+        elif t:
+            unsupported.append(f"output '{t}'")
+    a = {"company": co.get("name", ""), "currency": co.get("currency", ""), "payment_terms": co.get("payment_terms", ""),
+         "needs": cfg.get("needs", ""), "clients": clients, "charges": charges, "outputs": outs,
+         "output_dir": str(cfg.get("output_dir", "output"))}
+    return a, unsupported
+
+
+def load_answers(config_path):
+    """The answers behind an existing setup: setup-answers.json if the wizard wrote it, else read back from config.yml.
+    Returns (answers, unsupported) - 'unsupported' lists parts the wizard cannot show (they would be dropped on save)."""
+    from .config import load_config
+    p = Path(config_path)
+    j = p.parent / ANSWERS_FILE
+    if j.exists():
+        try:
+            return json.loads(j.read_text(encoding="utf-8")), []
+        except ValueError:
+            pass
+    return answers_from_config(load_config(p))

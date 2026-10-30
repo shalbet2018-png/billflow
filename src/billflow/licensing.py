@@ -79,7 +79,8 @@ def current(today=None):
     if not key and key_path().exists():
         key = key_path().read_text(encoding="utf-8").strip()
     if not key:
-        return License(note="Install a key with: billflow license install <key>")
+        return License(note="To add your key, press 'Enter licence key' on the main screen "
+                            "(or run: billflow license install <key>).")
     try:
         return verify(key, today)
     except LicenseError as e:

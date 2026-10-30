@@ -369,20 +369,26 @@ def test_gui_preview_execute_and_belt_moves(ws, monkeypatch, keys):
     except tk.TclError:
         pytest.skip("no display")
     monkeypatch.setattr(gui, "save_settings", lambda d: None)
+    monkeypatch.setattr(gui, "load_settings", lambda: {})
     monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
     monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: None)
+    opened = []
+    monkeypatch.setattr(gui, "open_path", opened.append)
     try:
         app = gui.App(root)
         lane = app.belt.lanes[0]
         x_before = app.c.coords(lane["ids"][0])[0]
         app.cfg_var.set(str(ws / "config.yml")); app.period_var.set("2026-11")
+        assert str(app.b_run["state"]) == "disabled"                      # cannot create before checking
         app.preview()
         _pump(root, 10, lambda: app.last is not None)
-        assert app.last and app.c.itemcget(app.stat["ready"], "text") == "3"
-        assert "16,500.50" in app.c.itemcget(app.stat["total"], "text")
+        assert app.last and app.stat["ready"].get() == "3"
+        assert "16,500.50" in app.stat["total"].get()
+        assert str(app.b_run["state"]) == "normal" and "look good" in app.hint.get()
         app.execute()
-        _pump(root, 10, lambda: (ws / "output/2026-11/summary.csv").exists() and not app.busy)
+        _pump(root, 10, lambda: (ws / "output/2026-11/summary.csv").exists() and not app.busy and opened)
         assert (ws / "output/2026-11/H1/invoice-H1.pdf").exists()
+        assert opened and str(opened[0]).endswith("2026-11")                # offered to open the month's folder
         assert app.c.coords(lane["ids"][0])[0] != x_before          # the belt kept moving
     finally:
         root.destroy()
@@ -396,13 +402,86 @@ def test_gui_execute_requires_preview(ws, monkeypatch, keys):
     except tk.TclError:
         pytest.skip("no display")
     shown = []
+    monkeypatch.setattr(gui, "load_settings", lambda: {})
     monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: shown.append(a))
     try:
         app = gui.App(root)
         app.cfg_var.set(str(ws / "config.yml"))
         app.execute()
-        assert shown and not (ws / "output").exists()
+        assert shown and "Check invoices" in shown[0][1] and not (ws / "output").exists()
     finally:
         root.destroy()
 
 
+def test_gui_explains_problems_in_plain_words_and_changing_month_needs_a_new_check(ws, monkeypatch, keys):
+    import tkinter as tk
+    from billflow import gui
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display")
+    monkeypatch.setattr(gui, "save_settings", lambda d: None)
+    monkeypatch.setattr(gui, "load_settings", lambda: {"theme": "plain"})
+    (ws / "readings-2026-11.csv").write_text("id,current,previous\nH1,817,830\nH2,1500,1450\n", encoding="utf-8")
+    try:
+        app = gui.App(root)
+        assert app.belt is None and gui.THEME == "plain"
+        app.cfg_var.set(str(ws / "config.yml")); app.period_var.set("2026-11")
+        app.preview()
+        _pump(root, 10, lambda: app.last is not None)
+        text = app.log.get("1.0", "end")
+        assert "meter reading went down" in text and "No Water Bill reading for A1 in readings-2026-11.csv" in text
+        assert "What to do" in text and "Open readings-2026-11.csv" in text
+        assert app.stat["errors"].get() == "2" and "need attention" in app.hint.get()
+        app.period_var.set("2026-12")
+        assert str(app.b_run["state"]) == "disabled"                      # a different month must be checked first
+        app.preview()
+        _pump(root, 10, lambda: not app.busy and "Something needs fixing" in app.log.get("1.0", "end"))
+        text = app.log.get("1.0", "end")
+        assert "Could not find the file" in text and "December 2026" in text
+    finally:
+        root.destroy()
+        gui.apply_theme("neon")
+
+
+def test_gui_licence_box_installs_key_without_command_line(monkeypatch, keys):
+    import tkinter as tk
+    from billflow import gui, licensing
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display")
+    monkeypatch.setattr(gui, "save_settings", lambda d: None)
+    monkeypatch.setattr(gui, "load_settings", lambda: {})
+    try:
+        app = gui.App(root)
+        assert "Trial" in app.lic_label["text"]
+        d = app.enter_licence()
+        d.box.insert("1.0", "not-a-key")
+        assert d.save(quiet=True) is False and "not accepted" in d.err["text"]
+        d.box.delete("1.0", "end")
+        d.box.insert("1.0", keys("Moke Gardens", max_clients=50))
+        assert d.save(quiet=True) is True
+        assert licensing.current().valid and "Moke Gardens" in app.lic_label["text"]
+    finally:
+        root.destroy()
+
+
+def test_gui_change_setup_reopens_the_wizard_with_saved_answers(ws, monkeypatch):
+    import tkinter as tk
+    from billflow import gui
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display")
+    monkeypatch.setattr(gui, "save_settings", lambda d: None)
+    monkeypatch.setattr(gui, "load_settings", lambda: {})
+    try:
+        app = gui.App(root)
+        app.cfg_var.set(str(ws / "config.yml"))                           # the hand-written demo config
+        w = app.change_setup()
+        assert w.editing and w.company.get() and len(w.charges) == 3
+        assert {c["kind"] for c in w.charges} == {"fixed", "metered", "extra"}
+        w.win.destroy()
+    finally:
+        root.destroy()
