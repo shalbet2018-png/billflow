@@ -1,0 +1,34 @@
+BILLFLOW SOFTWARE LICENCE AGREEMENT (DRAFT)
+
+Copyright (c) 2026 shalbet2018-png. All rights reserved.
+
+This is a draft for commercial use. Have a lawyer review it before selling.
+
+1. Licence. Subject to payment of the applicable fee and these terms, the Licensor grants you a
+   non-exclusive, non-transferable licence to install and use billflow ("the Software") for your
+   own internal business purposes, on the number of computers or companies stated in your order.
+
+2. Restrictions. You may not resell, sublicense, rent, or distribute the Software or its source code,
+   nor remove licence or copyright notices. You may write plugins and configuration for your own use.
+   Plugins you write remain yours.
+
+3. Your data. The Software runs on your computer. The Licensor does not receive, store or access your
+   client or financial data. You are responsible for backups and for the accuracy of your source files.
+
+4. Not accounting or tax advice. The Software performs calculations from the data and rules you
+   configure. You must review invoices before sending them. You are responsible for tax, legal and
+   regulatory compliance in your jurisdiction.
+
+5. Warranty disclaimer. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+
+6. Limitation of liability. TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE LICENSOR IS NOT LIABLE FOR
+   INDIRECT, INCIDENTAL OR CONSEQUENTIAL DAMAGES, OR LOSS OF PROFITS OR DATA. TOTAL LIABILITY IS
+   LIMITED TO THE FEES YOU PAID IN THE 12 MONTHS BEFORE THE CLAIM.
+
+7. Support and updates. Support and updates are provided for the period stated in your order.
+
+8. Termination. The licence ends if you breach these terms. On termination you must stop using and
+   delete the Software.
+
+9. Governing law. [Insert country/jurisdiction, e.g. Kenya]. Disputes go to the courts of that jurisdiction.

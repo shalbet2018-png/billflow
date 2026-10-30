@@ -7,3 +7,7 @@ output/
 billflow-state.json
 # never commit real customer data
 *.local.yml
+
+dist/
+installer-out/
+*.spec
