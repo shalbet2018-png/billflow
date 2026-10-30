@@ -57,8 +57,6 @@ def _num(text):
 
 def _button(parent, text, cmd, color=None, width=None):
     color = color or CYAN
-    if gui.THEME == "plain":
-        return gui.styled_button(parent, text, cmd, color, width=width, filled=color == GREEN)
     b = tk.Button(parent, text=text, command=cmd, font=(FONT, 10, "bold"), fg=color, bg=BTN_BG, bd=0, relief="flat",
                   activebackground=color, activeforeground=HOVER_FG, cursor="hand2", highlightthickness=1,
                   highlightbackground=color, highlightcolor=color, padx=10, pady=3, width=width)
@@ -445,17 +443,16 @@ class Wizard:
         self.test_month = v()
         if config_path:
             self.load(config_path)
-        if gui.THEME == "plain":
-            strip = tk.Canvas(self.win, height=8, highlightthickness=0, bg=gui.GRADIENT[0])
-            strip.pack(fill="x")
-            strip.bind("<Configure>", lambda e: gui.gradient(strip, e.width, 8, gui.GRADIENT))
+        if gui.THEME == "tron":
+            tk.Frame(self.win, bg=CYAN, height=2).pack(fill="x")
+            tk.Frame(self.win, bg=MAG, height=1).pack(fill="x", pady=(2, 0))
         self.title = tk.Label(self.win, text="", bg=BG, fg=CYAN, font=(FONT, 20, "bold"), anchor="w")
         self.title.pack(fill="x", padx=24, pady=(14, 0))
         self.bar = tk.Label(self.win, text="", bg=BG, fg=MAG, font=(FONT, 10, "bold"), anchor="w")
         self.bar.pack(fill="x", padx=24)
         nav = tk.Frame(self.win, bg=BG)
         nav.pack(side="bottom", fill="x", padx=24, pady=(0, 14))
-        self.body = tk.Frame(self.win, bg=PANEL, highlightthickness=1, highlightbackground=CYAN if gui.THEME == "neon" else BORDER)
+        self.body = tk.Frame(self.win, bg=PANEL, highlightthickness=1, highlightbackground=CYAN)
         self.body.pack(fill="both", expand=True, padx=24, pady=10)
         self.b_back = _button(nav, "< Back", self.back, MAG)
         self.b_next = _button(nav, "Next >", self.next, GREEN)

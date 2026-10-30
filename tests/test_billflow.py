@@ -425,7 +425,7 @@ def test_gui_explains_problems_in_plain_words_and_changing_month_needs_a_new_che
     (ws / "readings-2026-11.csv").write_text("id,current,previous\nH1,817,830\nH2,1500,1450\n", encoding="utf-8")
     try:
         app = gui.App(root)
-        assert app.belt is None and gui.THEME == "plain"
+        assert app.belt is not None and gui.THEME == "tron" and app.grid is not None   # an old "plain" choice opens as Tron
         app.cfg_var.set(str(ws / "config.yml")); app.period_var.set("2026-11")
         app.preview()
         _pump(root, 10, lambda: app.last is not None)
