@@ -53,7 +53,7 @@ The main screen is numbered in the order you use it, and the bar at the bottom a
 5. Press Create invoices (it only works after a check). BILLFLOW asks you to confirm, then writes the invoices, ledgers and a summary into a folder named for the month, and offers to open it.
 6. Check a few invoices, then send them.
 
-Prefer a calmer screen? Press Plain look (top right). Neon look switches back. BILLFLOW remembers your choice.
+Prefer a different style? Press Bright look (top right) for a colourful, easy-to-read screen. Neon look switches back. BILLFLOW remembers your choice.
 
 ## 6. Safety
 

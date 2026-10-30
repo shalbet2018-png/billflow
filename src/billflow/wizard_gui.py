@@ -57,6 +57,8 @@ def _num(text):
 
 def _button(parent, text, cmd, color=None, width=None):
     color = color or CYAN
+    if gui.THEME == "plain":
+        return gui.styled_button(parent, text, cmd, color, width=width, filled=color == GREEN)
     b = tk.Button(parent, text=text, command=cmd, font=(FONT, 10, "bold"), fg=color, bg=BTN_BG, bd=0, relief="flat",
                   activebackground=color, activeforeground=HOVER_FG, cursor="hand2", highlightthickness=1,
                   highlightbackground=color, highlightcolor=color, padx=10, pady=3, width=width)
@@ -395,7 +397,7 @@ def _file_shown(file, period=None):
     name = os.path.basename(str(file))
     if period and "{" in name:
         try:
-            return wizard.fill(name, period) + " (name changes each month)"
+            return wizard.fill(name, period) + " (new file each month)"
         except BillingError:
             pass
     return name
@@ -443,6 +445,10 @@ class Wizard:
         self.test_month = v()
         if config_path:
             self.load(config_path)
+        if gui.THEME == "plain":
+            strip = tk.Canvas(self.win, height=8, highlightthickness=0, bg=gui.GRADIENT[0])
+            strip.pack(fill="x")
+            strip.bind("<Configure>", lambda e: gui.gradient(strip, e.width, 8, gui.GRADIENT))
         self.title = tk.Label(self.win, text="", bg=BG, fg=CYAN, font=(FONT, 20, "bold"), anchor="w")
         self.title.pack(fill="x", padx=24, pady=(14, 0))
         self.bar = tk.Label(self.win, text="", bg=BG, fg=MAG, font=(FONT, 10, "bold"), anchor="w")

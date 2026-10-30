@@ -30,10 +30,12 @@ THEMES = {
     "neon": dict(BG="#05060f", PANEL="#080a1c", CYAN="#00f0ff", MAG="#ff2bd6", GREEN="#00ff9c", YEL="#fcee09",
                  RED="#ff3860", TEXT="#c9f6ff", MUTED="#5a8f96", INPUT="#02030a", INPUT_FG="#00f0ff", BORDER="#0b5560",
                  BTN_BG="#080a1c", HOVER_FG="#05060f", FONT="Consolas"),
-    "plain": dict(BG="#f3f5f8", PANEL="#ffffff", CYAN="#1d5fbf", MAG="#5b4bb7", GREEN="#1b7a3a", YEL="#8a5a00",
-                  RED="#c0392b", TEXT="#1f2933", MUTED="#5f6b7a", INPUT="#ffffff", INPUT_FG="#1f2933", BORDER="#c8d0da",
-                  BTN_BG="#eef2f7", HOVER_FG="#ffffff", FONT="Segoe UI"),
+    # "plain" is the Bright look (the key stays "plain" so saved choices keep working)
+    "plain": dict(BG="#f5f3fc", PANEL="#ffffff", CYAN="#4f46e5", MAG="#c026d3", GREEN="#059669", YEL="#d97706",
+                  RED="#e11d48", TEXT="#1e1b4b", MUTED="#6b6889", INPUT="#ffffff", INPUT_FG="#1e1b4b", BORDER="#e3dcf5",
+                  BTN_BG="#eef0ff", HOVER_FG="#ffffff", FONT="Segoe UI"),
 }
+GRADIENT = ("#4f46e5", "#9333ea", "#db2777", "#f97316")      # Bright look header: indigo > purple > pink > orange
 THEME = "neon"
 BG = PANEL = CYAN = MAG = GREEN = YEL = RED = TEXT = MUTED = INPUT = INPUT_FG = BORDER = BTN_BG = HOVER_FG = FONT = None
 
@@ -122,8 +124,58 @@ def plural(n, word):
     return f"{n} {word}" + ("" if n == 1 else "s")
 
 
-def styled_button(parent, text, cmd, color=None, big=False, width=None):
+def mix(c1, c2, t):
+    """Blend two #rrggbb colours: t=0 gives c1, t=1 gives c2."""
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(a, b))
+
+
+def gradient(canvas, width, height, stops, tag="grad"):
+    """Paints a left-to-right colour gradient across a canvas."""
+    canvas.delete(tag)
+    n = len(stops) - 1
+    step = 3
+    for x in range(0, max(width, 1), step):
+        pos = x / max(width - 1, 1) * n
+        i = min(int(pos), n - 1)
+        col = mix(stops[i], stops[i + 1], pos - i)
+        canvas.create_rectangle(x, 0, x + step, height, fill=col, outline=col, tags=tag)
+    canvas.tag_lower(tag)
+
+
+def set_enabled(b, on):
+    """Enables/disables a button and, in the Bright look, greys filled buttons out so it is obvious."""
+    b.configure(state="normal" if on else "disabled")
+    look = getattr(b, "_look", None)
+    if look:
+        b.configure(bg=look["bg"] if on else "#dcd8ea", highlightbackground=look["border"] if on else "#dcd8ea")
+
+
+def styled_button(parent, text, cmd, color=None, big=False, width=None, filled=False):
     color = color or CYAN
+    if THEME == "plain":
+        bg = color if filled else mix(color, "#ffffff", 0.88)
+        fg = "#ffffff" if filled else color
+        hover = mix(color, "#000000", 0.15) if filled else color
+        border = color if filled else mix(color, "#ffffff", 0.55)
+        b = tk.Button(parent, text=text, command=cmd, font=(FONT, 12 if big else 10, "bold"), fg=fg, bg=bg, bd=0,
+                      activebackground=hover, activeforeground="#ffffff", relief="flat", cursor="hand2",
+                      padx=18 if big else 14, pady=9 if big else 5, highlightthickness=1, highlightbackground=border,
+                      highlightcolor=border, disabledforeground="#ffffff" if filled else MUTED, width=width)
+        b._look = {"bg": bg, "border": border}
+
+        def enter(_):
+            if str(b["state"]) != "disabled":
+                b.configure(bg=hover, fg="#ffffff")
+
+        def leave(_):
+            if str(b["state"]) != "disabled":
+                b.configure(bg=bg, fg=fg)
+
+        b.bind("<Enter>", enter)
+        b.bind("<Leave>", leave)
+        return b
     b = tk.Button(parent, text=text, command=cmd, font=(FONT, 12 if big else 10, "bold"), fg=color, bg=BTN_BG, bd=0,
                   activebackground=color, activeforeground=HOVER_FG, relief="flat", cursor="hand2", padx=14,
                   pady=7 if big else 4, highlightthickness=1, highlightbackground=color, highlightcolor=color,
@@ -327,15 +379,53 @@ class App:
     # ---- layout --------------------------------------------------------------------------------------------------
     def _card(self, parent, step, title):
         outer = tk.Frame(parent, bg=PANEL, highlightthickness=1, highlightbackground=CYAN if THEME == "neon" else BORDER)
+        if THEME == "plain":
+            tk.Frame(outer, bg=GRADIENT[(step or 3) % len(GRADIENT)], height=4).pack(fill="x")    # coloured top edge
         head = tk.Frame(outer, bg=PANEL)
         head.pack(fill="x", padx=14, pady=(10, 4))
         if step:
-            tk.Label(head, text=f" {step} ", bg=CYAN, fg=HOVER_FG, font=(FONT, 11, "bold")).pack(side="left")
+            badge = GRADIENT[step % len(GRADIENT)] if THEME == "plain" else CYAN
+            tk.Label(head, text=f" {step} ", bg=badge, fg=HOVER_FG, font=(FONT, 11, "bold")).pack(side="left")
         tk.Label(head, text=("  " if step else "") + title, bg=PANEL, fg=CYAN if THEME == "neon" else TEXT,
                  font=(FONT, 12, "bold")).pack(side="left")
         body = tk.Frame(outer, bg=PANEL)
         body.pack(fill="x", padx=14, pady=(0, 12))
         return outer, body
+
+    def _bright_header(self, root):
+        """Bright look: a colourful gradient band with the name, licence and buttons on it."""
+        self.c = None
+        band = tk.Canvas(root, height=104, highlightthickness=0, bg=GRADIENT[0])
+        band.pack(fill="x")
+        self.lic_label = None
+        self._band = band
+        btn_ids = []
+        for text, cmd in (("Neon look", self.toggle_theme), ("Enter licence key", self.enter_licence)):
+            b = tk.Button(band, text=text, command=cmd, font=(FONT, 10, "bold"), fg=GRADIENT[-2], bg="#ffffff", bd=0,
+                          relief="flat", activebackground="#fde7f3", activeforeground=GRADIENT[-2], cursor="hand2",
+                          padx=12, pady=4)
+            btn_ids.append(band.create_window(0, 0, window=b, anchor="ne"))
+        self._lic_id = band.create_text(0, 0, text="", anchor="ne", justify="right", font=(FONT, 10, "bold"),
+                                        fill="#ffffff", tags="lic")
+
+        def draw(e=None):
+            w = band.winfo_width() if e is None else e.width
+            gradient(band, w, 104, GRADIENT)
+            band.delete("deco")
+            for x, y, r, t in ((w * 0.52, 86, 46, 0.18), (w * 0.62, 10, 26, 0.22), (w * 0.44, 18, 14, 0.3)):
+                band.create_oval(x - r, y - r, x + r, y + r, fill="", outline=mix(GRADIENT[2], "#ffffff", t), width=2,
+                                 tags="deco")                                    # soft bubbles for a bit of play
+            band.delete("title")
+            band.create_text(26, 40, text="BILLFLOW", anchor="w", font=(FONT, 28, "bold"), fill="#ffffff", tags="title")
+            band.create_text(28, 76, text="Monthly invoices, checked before anything is saved", anchor="w",
+                             font=(FONT, 11), fill="#ede9fe", tags="title")
+            band.coords(self._lic_id, w - 24, 14)
+            band.tag_raise(self._lic_id)
+            band.coords(btn_ids[0], w - 24, 60)
+            first = band.nametowidget(band.itemcget(btn_ids[0], "window"))
+            band.coords(btn_ids[1], w - 24 - first.winfo_reqwidth() - 8, 60)
+        band.bind("<Configure>", draw)
+        draw()
 
     def _build(self):
         root = self.root
@@ -345,8 +435,11 @@ class App:
         self.belt = None
 
         # header: name, licence, look switch
+        if THEME == "plain":
+            self._bright_header(root)
         head = tk.Frame(root, bg=BG)
-        head.pack(fill="x", padx=24, pady=(14, 6))
+        if THEME == "neon":
+            head.pack(fill="x", padx=24, pady=(14, 6))
         right = tk.Frame(head, bg=BG)
         right.pack(side="right", anchor="n")
         if THEME == "neon":
@@ -357,19 +450,13 @@ class App:
             self.c.create_text(5, 32, text="BILLFLOW", anchor="w", font=(FONT, 34, "bold"), fill=MAG)
             self.c.create_text(10, 72, text="monthly invoices, checked before anything is saved", anchor="w",
                                font=(FONT, 10), fill=GREEN)
-        else:
-            self.c = None
-            left = tk.Frame(head, bg=BG)
-            left.pack(side="left")
-            tk.Label(left, text="BILLFLOW", bg=BG, fg=CYAN, font=(FONT, 26, "bold")).pack(anchor="w")
-            tk.Label(left, text="Monthly invoices, checked before anything is saved", bg=BG, fg=MUTED,
-                     font=(FONT, 11)).pack(anchor="w")
-        self.lic_label = tk.Label(right, text="", bg=BG, font=(FONT, 10, "bold"), anchor="e", justify="right")
-        self.lic_label.pack(anchor="e")
-        btns = tk.Frame(right, bg=BG)
-        btns.pack(anchor="e", pady=(6, 0))
-        styled_button(btns, "Enter licence key", self.enter_licence, YEL).pack(side="left")
-        styled_button(btns, "Plain look" if THEME == "neon" else "Neon look", self.toggle_theme, MUTED).pack(side="left", padx=(8, 0))
+        if THEME == "neon":
+            self.lic_label = tk.Label(right, text="", bg=BG, font=(FONT, 10, "bold"), anchor="e", justify="right")
+            self.lic_label.pack(anchor="e")
+            btns = tk.Frame(right, bg=BG)
+            btns.pack(anchor="e", pady=(6, 0))
+            styled_button(btns, "Enter licence key", self.enter_licence, YEL).pack(side="left")
+            styled_button(btns, "Bright look", self.toggle_theme, MUTED).pack(side="left", padx=(8, 0))
 
         # step 1: setup
         top = tk.Frame(root, bg=BG)
@@ -398,11 +485,11 @@ class App:
         MonthMenu(b2, self.period_var, 18).pack(anchor="w")
         card3, b3 = self._card(row, "", "Then")
         card3.pack(side="left", fill="both", expand=True, padx=(10, 0))
-        self.b_prev = styled_button(b3, "3   Check invoices", self.preview, CYAN, big=True)
+        self.b_prev = styled_button(b3, "3   Check invoices", self.preview, CYAN, big=True, filled=True)
         self.b_prev.pack(side="left")
-        self.b_run = styled_button(b3, "4   Create invoices", self.execute, GREEN, big=True)
+        self.b_run = styled_button(b3, "4   Create invoices", self.execute, GREEN, big=True, filled=True)
         self.b_run.pack(side="left", padx=10)
-        self.b_out = styled_button(b3, "Open results folder", self.open_output, YEL, big=True)
+        self.b_out = styled_button(b3, "Open results folder", self.open_output, YEL, big=True, filled=True)
         self.b_out.pack(side="left")
 
         # tiles
@@ -411,17 +498,19 @@ class App:
         self.stat = {}
         for i, (key, label, color) in enumerate((("clients", "Clients", CYAN), ("ready", "Ready", GREEN),
                                                  ("errors", "Need attention", RED), ("total", "Total to bill", MAG))):
-            t = tk.Frame(tiles, bg=PANEL, highlightthickness=1, highlightbackground=color if THEME == "neon" else BORDER)
+            tbg = mix(color, "#ffffff", 0.9) if THEME == "plain" else PANEL
+            t = tk.Frame(tiles, bg=tbg, highlightthickness=1,
+                         highlightbackground=color if THEME == "neon" else mix(color, "#ffffff", 0.7))
             t.pack(side="left", fill="x", expand=True, padx=(0 if i == 0 else 8, 0))
-            tk.Label(t, text=label, bg=PANEL, fg=color, font=(FONT, 10, "bold"), anchor="w").pack(fill="x", padx=12, pady=(8, 0))
+            tk.Label(t, text=label, bg=tbg, fg=color, font=(FONT, 10, "bold"), anchor="w").pack(fill="x", padx=12, pady=(8, 0))
             self.stat[key] = tk.StringVar(value="-")
-            tk.Label(t, textvariable=self.stat[key], bg=PANEL, fg=TEXT, font=(FONT, 20, "bold"), anchor="w").pack(
-                fill="x", padx=12, pady=(0, 8))
+            tk.Label(t, textvariable=self.stat[key], bg=tbg, fg=color if THEME == "plain" else TEXT,
+                     font=(FONT, 22, "bold"), anchor="w").pack(fill="x", padx=12, pady=(0, 8))
 
         # hint bar (bottom) and results
-        bar = tk.Frame(root, bg=CYAN if THEME == "neon" else "#e6eefb")
+        bar = tk.Frame(root, bg=CYAN)
         bar.pack(side="bottom", fill="x")
-        tk.Label(bar, textvariable=self.hint, bg=bar["bg"], fg=HOVER_FG if THEME == "neon" else "#123a73",
+        tk.Label(bar, textvariable=self.hint, bg=bar["bg"], fg=HOVER_FG,
                  font=(FONT, 11, "bold"), anchor="w", justify="left", wraplength=W - 60).pack(fill="x", padx=24, pady=8)
         res = tk.Frame(root, bg=PANEL, highlightthickness=1, highlightbackground=MAG if THEME == "neon" else BORDER)
         res.pack(fill="both", expand=True, padx=24, pady=(10, 12))
@@ -475,8 +564,8 @@ class App:
         checked = self._checked()
         ready = checked and any(r.status == "OK" for r in self.last[2])
         if hasattr(self, "b_run"):
-            self.b_prev.configure(state="disabled" if self.busy else "normal")
-            self.b_run.configure(state="normal" if ready and not self.busy else "disabled")
+            set_enabled(self.b_prev, not self.busy)
+            set_enabled(self.b_run, ready and not self.busy)
         if self.busy:
             self.hint.set(HINTS["busy"])
         elif not self.cfg_var.get().strip():
@@ -591,7 +680,11 @@ class App:
             text, color = f"Licensed to {lic.customer} ({lim})\nvalid until {lic.expires:%d %B %Y}", GREEN
         else:
             text, color = f"Trial: up to {licensing.TRIAL_MAX_CLIENTS} invoices per run\n(checking is always unlimited)", YEL
-        self.lic_label.configure(text=text, fg=color)
+        self.licence_text = text
+        if THEME == "plain":
+            self._band.itemconfigure(self._lic_id, text=text)
+        else:
+            self.lic_label.configure(text=text, fg=color)
 
     # ---- animation -----------------------------------------------------------------------------------------------
     def _tick(self):

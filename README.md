@@ -68,8 +68,8 @@ Start menu / desktop shortcut **BILLFLOW** (or `billflow gui`) opens the main sc
 **1** choose your business setup (remembered; **New setup**, **Change my setup** or **Try with sample data**), **2** choose the
 month from a list, **3 Check invoices**, **4 Create invoices** (enabled only after a check of that setup and month) and confirm.
 Every problem is shown in plain words with a *What to do* line and a link to open the file concerned; a bar at the bottom
-always says what to do next. **Enter licence key** installs a key without the command line. **Plain look / Neon look**
-switches between a plain office style and the original cyberpunk style (remembered). The screen never sends emails or pushes
+always says what to do next. **Enter licence key** installs a key without the command line. **Bright look / Neon look**
+switches between a colourful light style (gradient header, filled buttons) and the original cyberpunk style (remembered). The screen never sends emails or pushes
 to online systems - use the command line with `--send-emails` / `--push` for that.
 
 ## Setup wizard

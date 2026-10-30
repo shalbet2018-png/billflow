@@ -455,14 +455,14 @@ def test_gui_licence_box_installs_key_without_command_line(monkeypatch, keys):
     monkeypatch.setattr(gui, "load_settings", lambda: {})
     try:
         app = gui.App(root)
-        assert "Trial" in app.lic_label["text"]
+        assert "Trial" in app.licence_text
         d = app.enter_licence()
         d.box.insert("1.0", "not-a-key")
         assert d.save(quiet=True) is False and "not accepted" in d.err["text"]
         d.box.delete("1.0", "end")
         d.box.insert("1.0", keys("Moke Gardens", max_clients=50))
         assert d.save(quiet=True) is True
-        assert licensing.current().valid and "Moke Gardens" in app.lic_label["text"]
+        assert licensing.current().valid and "Moke Gardens" in app.licence_text
     finally:
         root.destroy()
 
