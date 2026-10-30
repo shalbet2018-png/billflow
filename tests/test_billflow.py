@@ -1,3 +1,4 @@
+import json
 import csv
 import shutil
 from decimal import Decimal
@@ -290,5 +291,118 @@ def test_json_output_file(ws):
     assert run(ws, "--yes") == 0
     d = json.loads((ws / "output/2026-11/H1/invoice-H1.json").read_text())
     assert d["invoice_no"] == "H1/13" and d["total"] == "6340.00"
+
+
+
+
+# ---- accounting connectors -------------------------------------------------------------------------------------
+
+def _accounting(ws, **params):
+    _edit(ws, lambda c: c["outputs"].append(params))
+
+
+def test_xero_and_quickbooks_save_payload_and_never_post_without_push(ws, monkeypatch):
+    from billflow.connectors import accounting
+    monkeypatch.setattr(accounting, "_post_json", lambda *a: pytest.fail("must not post"))
+    (ws / "clients.csv").write_text((ws / "clients.csv").read_text().replace("last_invoice", "last_invoice,qb_id")
+                                    .replace(",12\n", ",12,101\n").replace(",7\n", ",7,102\n").replace(",3\n", ",3,103\n"), encoding="utf-8")
+    _accounting(ws, type="xero", mode="api", account_code="200")
+    _accounting(ws, type="quickbooks", mode="api", customer_id_column="qb_id", item_id="9")
+    assert run(ws, "--yes") == 0
+    x = json.loads((ws / "output/2026-11/H1/xero-H1.json").read_text())["Invoices"][0]
+    assert x["InvoiceNumber"] == "H1/13" and x["Status"] == "DRAFT" and x["LineItems"][0]["AccountCode"] == "200"
+    q = json.loads((ws / "output/2026-11/H1/quickbooks-H1.json").read_text())
+    assert q["CustomerRef"] == {"value": "101"} and q["DocNumber"] == "H1/13"
+
+
+def test_push_posts_with_tokens_from_environment(ws, monkeypatch):
+    from billflow.connectors import accounting
+    calls = []
+    monkeypatch.setattr(accounting, "_post_json", lambda url, h, p: calls.append((url, h)) or {})
+    monkeypatch.setenv("XERO_ACCESS_TOKEN", "tok"); monkeypatch.setenv("XERO_TENANT_ID", "ten")
+    _accounting(ws, type="xero", mode="api")
+    assert run(ws, "--yes", "--push") == 0
+    assert len(calls) == 3 and calls[0][0].endswith("/Invoices")
+    assert calls[0][1] == {"Authorization": "Bearer tok", "xero-tenant-id": "ten"}
+
+
+def test_push_without_token_is_reported_per_client(ws, monkeypatch):
+    from billflow.connectors import accounting
+    monkeypatch.setattr(accounting, "_post_json", lambda *a: {})
+    monkeypatch.delenv("XERO_ACCESS_TOKEN", raising=False)
+    _accounting(ws, type="xero", mode="api")
+    run(ws, "--yes", "--push")
+    rows = list(csv.DictReader(open(ws / "output/2026-11/summary.csv")))
+    assert all(r["Status"] == "ERROR" and "XERO_ACCESS_TOKEN" in r["Notes"] for r in rows)
+
+
+def test_webhook_posts_invoice_json(ws, monkeypatch):
+    from billflow.connectors import accounting
+    calls = []
+    monkeypatch.setattr(accounting, "_post_json", lambda url, h, p: calls.append((url, p)) or {})
+    _accounting(ws, type="webhook", mode="api", url="https://hooks.example/abc")
+    assert run(ws, "--yes", "--push") == 0
+    assert calls[0][0] == "https://hooks.example/abc" and calls[0][1]["invoice_no"] == "H1/13"
+
+
+def test_quickbooks_missing_customer_id_is_reported(ws):
+    _accounting(ws, type="quickbooks", item_id="9", customer_id_column="nope")
+    run(ws, "--yes")
+    assert all(r["Status"] == "ERROR" for r in csv.DictReader(open(ws / "output/2026-11/summary.csv")))
+
+
+# ---- desktop screen --------------------------------------------------------------------------------------------
+
+def _pump(root, seconds=3.0, until=None):
+    import time
+    end = time.time() + seconds
+    while time.time() < end and not (until and until()):
+        root.update()
+        time.sleep(0.02)
+
+
+def test_gui_preview_execute_and_belt_moves(ws, monkeypatch, keys):
+    import tkinter as tk
+    from billflow import gui
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display")
+    monkeypatch.setattr(gui, "save_settings", lambda d: None)
+    monkeypatch.setattr(gui.messagebox, "askyesno", lambda *a, **k: True)
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: None)
+    try:
+        app = gui.App(root)
+        lane = app.belt.lanes[0]
+        x_before = app.c.coords(lane["ids"][0])[0]
+        app.cfg_var.set(str(ws / "config.yml")); app.period_var.set("2026-11")
+        app.preview()
+        _pump(root, 10, lambda: app.last is not None)
+        assert app.last and app.c.itemcget(app.stat["ready"], "text") == "3"
+        assert "16,500.50" in app.c.itemcget(app.stat["total"], "text")
+        app.execute()
+        _pump(root, 10, lambda: (ws / "output/2026-11/summary.csv").exists() and not app.busy)
+        assert (ws / "output/2026-11/H1/invoice-H1.pdf").exists()
+        assert app.c.coords(lane["ids"][0])[0] != x_before          # the belt kept moving
+    finally:
+        root.destroy()
+
+
+def test_gui_execute_requires_preview(ws, monkeypatch, keys):
+    import tkinter as tk
+    from billflow import gui
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display")
+    shown = []
+    monkeypatch.setattr(gui.messagebox, "showinfo", lambda *a, **k: shown.append(a))
+    try:
+        app = gui.App(root)
+        app.cfg_var.set(str(ws / "config.yml"))
+        app.execute()
+        assert shown and not (ws / "output").exists()
+    finally:
+        root.destroy()
 
 

@@ -62,6 +62,24 @@ outputs:
   (`--yes` skips the question for scheduled runs).
 - The password is never stored in the config: set the `BILLFLOW_SMTP_PASSWORD` environment variable.
 - A client with a missing/invalid address or a failed send is reported and skipped; the others continue.
+## Desktop screen
+
+Start menu / desktop shortcut **BILLFLOW** (or `billflow gui`) opens a cyberpunk-styled window: choose a config
+(or press **DEMO** for sample data), type the month, **PREVIEW**, then **EXECUTE** and confirm. Nothing is written until you
+confirm, and the screen never sends emails or pushes to online systems - use the command line with `--send-emails` / `--push` for that.
+
+## Accounting systems
+
+| Output | What it does | Environment variables |
+|---|---|---|
+| `xero` | Creates an Accounts Receivable invoice (DRAFT by default). Options: `account_code`, `contact_id_column`, `status`, `due_days` | `XERO_ACCESS_TOKEN`, `XERO_TENANT_ID` |
+| `quickbooks` | Creates an invoice. Needs `customer_id_column` (your client list's QuickBooks id) and `item_id`; `base_url` for the sandbox | `QUICKBOOKS_ACCESS_TOKEN`, `QUICKBOOKS_REALM_ID` |
+| `webhook` | POSTs the invoice JSON to any URL (Zapier, Make, n8n, your own app); optional `bearer_env` | your choice |
+
+Each writes its request as a JSON file first. It is **sent only when the output has `mode: api` and you run with `--push`**
+(with a confirmation question). Put these outputs last so a later failure cannot re-send an invoice. Tokens are OAuth access
+tokens you obtain from the provider; billflow does not store them. These connectors are tested with simulated servers -
+try them against a Xero demo company or QuickBooks sandbox first.
 ## Licensing
 
 billflow runs in **trial mode** (up to 5 clients per run; previews are always unlimited) until a licence key is installed:
@@ -109,5 +127,6 @@ new data sources (other websites, accounting systems, email) are added without t
 pip install -e ".[dev]"
 pytest
 ```
+
 
 

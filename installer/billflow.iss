@@ -16,6 +16,7 @@ ChangesEnvironment=yes
 
 [Files]
 Source: "..\dist\billflow\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "..\dist\billflow-gui\*"; DestDir: "{app}\gui"; Flags: recursesubdirs ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -36,3 +37,4 @@ begin
   if not RegQueryStringValue(HKCU, 'Environment', 'Path', P) then begin Result := True; exit; end;
   Result := Pos(';' + Uppercase(ExpandConstant(Param)) + ';', ';' + Uppercase(P) + ';') = 0;
 end;
+

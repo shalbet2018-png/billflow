@@ -29,14 +29,21 @@ def main(argv=None):
     p_run.add_argument("--yes", action="store_true", help="skip the confirmation question")
     p_run.add_argument("--send-emails", action="store_true",
                        help="actually send emails (otherwise they are only saved as .eml drafts)")
+    p_run.add_argument("--push", action="store_true",
+                       help="actually send invoices to Xero/QuickBooks/webhook outputs set to mode: api")
     p_run.add_argument("--force", action="store_true", help="re-issue clients already invoiced for the period")
     p_run.add_argument("--only", default="", help="comma-separated client ids")
+    sub.add_parser("gui", help="open the desktop screen")
     p_lic = sub.add_parser("license", help="show or install a licence key")
     lsub = p_lic.add_subparsers(dest="lcmd", required=True)
     lsub.add_parser("status", help="show the active licence")
     p_inst = lsub.add_parser("install", help="install a licence key (the text or a file containing it)")
     p_inst.add_argument("key")
     args = ap.parse_args(argv)
+
+    if args.cmd == "gui":
+        from .gui import main as gui_main
+        return gui_main()
 
     if args.cmd == "license":
         from . import licensing
@@ -84,6 +91,13 @@ def main(argv=None):
         return 1
     ok = [r for r in results if r.status == "OK"]
     cfg["_send_emails"] = bool(args.send_emails)
+    cfg["_push"] = bool(args.push)
+    live = [o["type"] for o in cfg["outputs"] if o["type"] in ("xero", "quickbooks", "webhook") and o.get("mode") == "api"]
+    if args.push and live:
+        print(f"\nPUSH: {len(ok)} invoice(s) will be sent to: {', '.join(sorted(set(live)))}.")
+        if not args.yes and input("Send to these systems for real? [y/N] ").strip().lower() != "y":
+            cfg["_push"] = False
+            print("Invoices will only be saved as JSON files.")
     if args.send_emails and any(o["type"] == "email" for o in cfg["outputs"]):
         print(f"\nEMAIL: {len(ok)} email(s) will be SENT to clients.")
         if not args.yes and input("Send emails for real? [y/N] ").strip().lower() != "y":
