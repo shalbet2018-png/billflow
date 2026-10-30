@@ -143,8 +143,6 @@ class App:
 
     def _build(self):
         c = self.c
-        c.create_rectangle(30, 14, 560, 100, fill=BG, outline="")
-        c.create_rectangle(W - 470, 24, W - 30, 78, fill=BG, outline="")
         c.create_text(42, 44, text="BILLFLOW", anchor="w", font=(FONT, 38, "bold"), fill=CYAN)
         c.create_text(39, 42, text="BILLFLOW", anchor="w", font=(FONT, 38, "bold"), fill=MAG)
         c.create_text(44, 84, text="// NEURAL LEDGER INTERFACE  v0.1  //  ACCOUNTS BOT ONLINE", anchor="w",
