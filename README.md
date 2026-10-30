@@ -1,4 +1,4 @@
-# billflow
+﻿# billflow
 
 Configurable monthly invoicing and ledger automation. You describe your clients, where the monthly numbers come from,
 how each charge is calculated and what to produce - billflow does the rest, and **asks for confirmation before it writes anything**.
@@ -39,6 +39,29 @@ Built-in rules: `fixed` (flat amount or client column), `metered` ((current - pr
 Word templates use `{{company}} {{client_name}} {{client_<column>}} {{invoice_no}} {{date}} {{period}} {{total}} {{payment_terms}}`
 and one table row containing `{{item}} {{description}} {{qty}} {{unit_price}} {{amount}}`, which is repeated per line.
 
+## Email
+
+Add an `email` output **after** the pdf/docx outputs so it can attach their files:
+
+```yaml
+outputs:
+  - type: pdf
+  - type: email
+    mode: smtp                 # default is "draft"
+    host: smtp.office365.com
+    port: 587
+    from: billing@yourcompany.com
+    to_column: email           # client column holding the address
+    subject: "Invoice {invoice_no} - {period}"
+    body: "Dear {client_name}, please find attached invoice {invoice_no}. Total: {total}."
+    attach: [".pdf"]
+```
+
+- By default every email is only **saved as an `.eml` draft** you can open and check.
+- Emails are sent only when the config says `mode: smtp` **and** you run with `--send-emails`; you are asked to confirm again
+  (`--yes` skips the question for scheduled runs).
+- The password is never stored in the config: set the `BILLFLOW_SMTP_PASSWORD` environment variable.
+- A client with a missing/invalid address or a failed send is reported and skipped; the others continue.
 ## Customising (plugins)
 
 ```python
@@ -62,3 +85,4 @@ new data sources (other websites, accounting systems, email) are added without t
 pip install -e ".[dev]"
 pytest
 ```
+

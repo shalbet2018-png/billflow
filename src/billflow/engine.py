@@ -27,6 +27,7 @@ class Context:
         self.period = period
         self.vars = period_vars(period)
         self._cache = {}
+        self.files = []
 
     def _src_cfg(self, name):
         try:
@@ -133,11 +134,14 @@ def commit(cfg, period, results):
         if res.status != "OK":
             continue
         try:
+            ctx.files = []
             for out in cfg["outputs"]:
                 fn = OUTPUTS.get(out["type"])
                 if not fn:
                     raise ConfigError(f"Unknown output type '{out['type']}'")
-                res.files += [str(p) for p in fn(res.invoice, out, ctx)]
+                made = [str(p) for p in fn(res.invoice, out, ctx)]
+                ctx.files += made
+                res.files += made
         except (BillingError, OSError) as e:
             res.status, res.message = "ERROR", f"Writing files failed: {e}"
             continue

@@ -124,3 +124,48 @@ def test_config_errors_are_clear(ws):
         load_config(ws / "bad.yml")
     assert cli.main(["run", "--config", str(ws / "bad.yml"), "--period", "2026-11"]) == 2
     assert cli.main(["run", "--config", str(ws / "config.yml"), "--period", "2026-13"]) == 2
+
+
+def _with_email(ws, **params):
+    cfg = (ws / "config.yml").read_text(encoding="utf-8")
+    block = "  - type: email\n" + "".join(f"    {k}: {v}\n" for k, v in params.items())
+    (ws / "config.yml").write_text(cfg.replace("\noutput_dir:", "\n" + block + "\noutput_dir:", 1)
+                                   .replace("  - type: ledger_xlsx\n", "  - type: ledger_xlsx\n", 1), encoding="utf-8")
+
+
+def test_email_saves_draft_with_pdf_and_never_sends_by_default(ws, monkeypatch):
+    import smtplib
+    monkeypatch.setattr(smtplib, "SMTP", lambda *a, **k: pytest.fail("must not send"))
+    _with_email(ws, mode="smtp", host="smtp.example.com", **{"from": "billing@acme.test"})
+    assert run(ws, "--yes") == 0
+    import email
+    from email import policy
+    msg = email.message_from_bytes((ws / "output/2026-11/H1/email-H1.eml").read_bytes(), policy=policy.default)
+    assert "H1/13" in msg["Subject"]
+    assert [a.get_filename() for a in msg.iter_attachments()] == ["invoice-H1.pdf"]
+
+
+def test_email_sends_only_with_flag_and_mode_smtp(ws, monkeypatch):
+    import smtplib
+    sent = []
+
+    class FakeSMTP:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def starttls(self): pass
+        def login(self, u, p): pass
+        def send_message(self, m): sent.append(m["To"])
+
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    _with_email(ws, mode="smtp", host="smtp.example.com", **{"from": "billing@acme.test"})
+    assert run(ws, "--yes", "--send-emails") == 0
+    assert len(sent) == 3
+
+
+def test_email_missing_address_is_reported_not_guessed(ws):
+    (ws / "clients.csv").write_text((ws / "clients.csv").read_text().replace("@", "_at_", 1), encoding="utf-8")
+    _with_email(ws)
+    run(ws, "--yes")
+    rows = {r["Client"]: r for r in csv.DictReader(open(ws / "output/2026-11/summary.csv"))}
+    assert sum(r["Status"] == "ERROR" for r in rows.values()) == 1

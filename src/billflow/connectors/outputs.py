@@ -160,3 +160,59 @@ def ledger_xlsx(invoice, params, ctx):
     ws.cell(r, 1).number_format = "yyyy-mm-dd"
     wb.save(path)
     return [path]
+
+
+@output("email")
+def email_output(invoice, params, ctx):
+    """Emails the files made earlier for this client. Saves an .eml draft unless mode is 'smtp'
+    and the run was started with --send-emails. The SMTP password is read from an environment variable."""
+    import mimetypes
+    import os
+    import smtplib
+    from email.message import EmailMessage
+
+    company = ctx.cfg["company"]
+    to = str(invoice.client.get(params.get("to_column", "email"), "")).strip()
+    if "@" not in to:
+        raise BillingError(f"No valid email address for client {invoice.client_id}")
+    fields = {"company": company["name"], "client_name": invoice.client_name, "invoice_no": invoice.number,
+              "period": invoice.period, "total": f"{company.get('currency', '')} {_money(invoice.total)}".strip(),
+              **{f"client_{k}": v for k, v in invoice.client.items() if not k.startswith("_")}}
+    subject = str(params.get("subject", "Invoice {invoice_no} - {period}")).format(**fields)
+    body = str(params.get("body", "Dear {client_name},\n\nPlease find attached invoice {invoice_no} "
+                                  "for {period}. Total: {total}.\n\nKind regards,\n{company}")).format(**fields)
+    sender = params.get("from") or os.environ.get(params.get("from_env", "BILLFLOW_FROM"), "")
+    msg = EmailMessage()
+    msg["To"], msg["Subject"] = to, subject
+    msg["From"] = sender or "billing@example.invalid"
+    if params.get("cc"):
+        msg["Cc"] = params["cc"]
+    msg.set_content(body)
+    wanted = [e.lower() for e in params.get("attach", [".pdf"])]
+    for f in ctx.files:
+        p = Path(f)
+        if p.suffix.lower() in wanted:
+            ctype = (mimetypes.guess_type(p.name)[0] or "application/octet-stream").split("/", 1)
+            msg.add_attachment(p.read_bytes(), maintype=ctype[0], subtype=ctype[1], filename=p.name)
+
+    draft = _fmt_path(ctx, params, "draft_path", invoice, "{period}/{client_id}/email-{client_id}.eml")
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_bytes(bytes(msg))
+    if params.get("mode", "draft") != "smtp" or not ctx.cfg.get("_send_emails"):
+        return [draft]
+    if not sender:
+        raise BillingError("Email 'from' address is not set")
+    host = params.get("host")
+    if not host:
+        raise BillingError("Email 'host' is not set")
+    user = params.get("username") or sender
+    password = os.environ.get(params.get("password_env", "BILLFLOW_SMTP_PASSWORD"), "")
+    try:
+        with smtplib.SMTP(host, int(params.get("port", 587)), timeout=30) as s:
+            s.starttls()
+            if password:
+                s.login(user, password)
+            s.send_message(msg)
+    except (smtplib.SMTPException, OSError) as e:
+        raise BillingError(f"Email to {to} failed: {e}")
+    return [draft]

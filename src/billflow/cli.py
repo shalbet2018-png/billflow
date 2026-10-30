@@ -26,6 +26,8 @@ def main(argv=None):
     p_run.add_argument("--period", required=True, help="billing month, e.g. 2026-11")
     p_run.add_argument("--dry-run", action="store_true", help="show what would happen, write nothing")
     p_run.add_argument("--yes", action="store_true", help="skip the confirmation question")
+    p_run.add_argument("--send-emails", action="store_true",
+                       help="actually send emails (otherwise they are only saved as .eml drafts)")
     p_run.add_argument("--force", action="store_true", help="re-issue clients already invoiced for the period")
     p_run.add_argument("--only", default="", help="comma-separated client ids")
     args = ap.parse_args(argv)
@@ -50,6 +52,13 @@ def main(argv=None):
     if not args.yes and input("\nCreate these invoices now? [y/N] ").strip().lower() != "y":
         print("Cancelled - nothing was written.")
         return 1
+    ok = [r for r in results if r.status == "OK"]
+    cfg["_send_emails"] = bool(args.send_emails)
+    if args.send_emails and any(o["type"] == "email" for o in cfg["outputs"]):
+        print(f"\nEMAIL: {len(ok)} email(s) will be SENT to clients.")
+        if not args.yes and input("Send emails for real? [y/N] ").strip().lower() != "y":
+            cfg["_send_emails"] = False
+            print("Emails will only be saved as drafts.")
     summary = commit(cfg, args.period, results)
     print(f"Done. Summary: {summary}")
     return 0 if all(r.status != "ERROR" for r in results) else 3
