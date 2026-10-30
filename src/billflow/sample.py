@@ -74,13 +74,13 @@ H2,500.50,Electricity bill B
 """
 
 
-def build_template(path):
+def build_template(path, email_column="email"):
     from docx import Document
 
     d = Document()
     d.add_heading("{{company}}", 1)
     d.add_paragraph("INVOICE {{invoice_no}}")
-    d.add_paragraph("Bill to: {{client_name}}  ({{client_email}})")
+    d.add_paragraph("Bill to: {{client_name}}" + (f"  ({{{{client_{email_column}}}}})" if email_column else ""))
     d.add_paragraph("Date: {{date}}   Period: {{period}}")
     t = d.add_table(rows=2, cols=5)
     t.style = "Table Grid"

@@ -161,6 +161,7 @@ class App:
         c.create_text(48, 192, text="PERIOD", anchor="w", font=(FONT, 10, "bold"), fill=GREEN)
         c.create_window(120, 180, window=tk.Entry(self.root, textvariable=self.period_var, **ent), width=110, height=26, anchor="nw")
         c.create_text(240, 192, text="YYYY-MM", anchor="w", font=(FONT, 8), fill="#3a6a70")
+        self._btn(300, 178, 190, "SETUP WIZARD", self.open_wizard, MAG)
         self.b_prev = self._btn(500, 178, 150, "> PREVIEW", self.preview)
         self.b_run = self._btn(660, 178, 150, "> EXECUTE", self.execute, GREEN)
         self._btn(820, 178, 174, "OPEN OUTPUT", self.open_output, YEL)
@@ -260,6 +261,15 @@ class App:
         p = filedialog.askopenfilename(title="Choose config.yml", filetypes=[("Config", "*.yml *.yaml"), ("All", "*.*")])
         if p:
             self.cfg_var.set(p)
+
+    def open_wizard(self):
+        from .wizard_gui import open_wizard
+
+        def done(path, period):
+            self.cfg_var.set(path)
+            self.period_var.set(period)
+
+        open_wizard(self.root, done)
 
     def make_demo(self):
         from .sample import init_workspace

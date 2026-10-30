@@ -19,8 +19,11 @@ Source: "..\dist\billflow\*"; DestDir: "{app}"; Flags: recursesubdirs ignorevers
 Source: "..\dist\billflow-gui\*"; DestDir: "{app}\gui"; Flags: recursesubdirs ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\docs\GUIDE.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\docs\BILLFLOW-Business-Guide.docx"; DestDir: "{app}\docs"; Flags: ignoreversion
 
 [Icons]
+Name: "{group}\billflow Business Guide"; Filename: "{app}\docs\BILLFLOW-Business-Guide.docx"
 Name: "{group}\billflow README"; Filename: "{app}\README.md"
 Name: "{group}\Uninstall billflow"; Filename: "{uninstallexe}"
 

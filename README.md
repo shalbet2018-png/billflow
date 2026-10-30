@@ -68,6 +68,13 @@ Start menu / desktop shortcut **BILLFLOW** (or `billflow gui`) opens a cyberpunk
 (or press **DEMO** for sample data), type the month, **PREVIEW**, then **EXECUTE** and confirm. Nothing is written until you
 confirm, and the screen never sends emails or pushes to online systems - use the command line with `--send-emails` / `--push` for that.
 
+## Setup wizard
+
+`billflow setup` (or SETUP WIZARD on the screen) lets a business describe its needs, link its own client list, readings and
+extra-bill files (month names in file names become patterns), choose outputs, test, and save a `config.yml`. For scripts:
+`billflow setup --answers answers.json --folder C:\path`. The free-text "what you need" note is stored in `needs:` as a
+record; it is not interpreted. See `docs\GUIDE.md` for the plain-language business guide.
+
 ## Accounting systems
 
 | Output | What it does | Environment variables |

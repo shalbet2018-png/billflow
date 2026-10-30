@@ -34,6 +34,9 @@ def main(argv=None):
     p_run.add_argument("--force", action="store_true", help="re-issue clients already invoiced for the period")
     p_run.add_argument("--only", default="", help="comma-separated client ids")
     sub.add_parser("gui", help="open the desktop screen")
+    p_set = sub.add_parser("setup", help="guided setup of a new business (opens the wizard)")
+    p_set.add_argument("--answers", help="JSON file of answers: write the setup without opening the screen")
+    p_set.add_argument("--folder", help="where to save the setup (with --answers)")
     p_lic = sub.add_parser("license", help="show or install a licence key")
     lsub = p_lic.add_subparsers(dest="lcmd", required=True)
     lsub.add_parser("status", help="show the active licence")
@@ -44,6 +47,28 @@ def main(argv=None):
     if args.cmd == "gui":
         from .gui import main as gui_main
         return gui_main()
+
+    if args.cmd == "setup":
+        if args.answers:
+            import json
+            from . import wizard
+            if not args.folder:
+                print("Error: --folder is required with --answers", file=sys.stderr)
+                return 2
+            try:
+                with open(args.answers, encoding="utf-8") as f:
+                    print("Saved " + str(wizard.write_config(json.load(f), args.folder)))
+            except (OSError, ValueError, ConfigError) as e:
+                print(f"Error: {e}", file=sys.stderr)
+                return 2
+            return 0
+        import tkinter as tk
+        from .wizard_gui import open_wizard
+        root = tk.Tk()
+        root.withdraw()
+        open_wizard(root, lambda path, period: print(path)).win.wait_window()
+        root.destroy()
+        return 0
 
     if args.cmd == "license":
         from . import licensing
