@@ -107,6 +107,7 @@ def plan(cfg, period, only=None, force=False):
         client = dict(row, _id=cid)
         try:
             lines = []
+            client["_lines"] = lines
             for ch in cfg["charges"]:
                 fn = RULES.get(ch["rule"])
                 if not fn:

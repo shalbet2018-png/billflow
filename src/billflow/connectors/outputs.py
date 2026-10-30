@@ -216,3 +216,19 @@ def email_output(invoice, params, ctx):
     except (smtplib.SMTPException, OSError) as e:
         raise BillingError(f"Email to {to} failed: {e}")
     return [draft]
+
+
+@output("json")
+def json_output(invoice, params, ctx):
+    """One JSON file per invoice, for importing into other systems."""
+    import json
+    path = _fmt_path(ctx, params, "path", invoice, "{period}/{client_id}/invoice-{client_id}.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {"company": ctx.cfg["company"]["name"], "currency": ctx.cfg["company"].get("currency", ""),
+            "invoice_no": invoice.number, "client_id": invoice.client_id, "client_name": invoice.client_name,
+            "issue_date": invoice.issue_date.isoformat(), "period": invoice.period,
+            "lines": [{"item": l.item, "description": l.description, "qty": str(l.qty),
+                       "unit_price": str(l.unit_price), "amount": str(l.amount)} for l in invoice.lines],
+            "total": str(invoice.total)}
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return [path]

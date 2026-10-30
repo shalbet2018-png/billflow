@@ -1,4 +1,4 @@
-﻿# billflow
+# billflow
 
 Configurable monthly invoicing and ledger automation. You describe your clients, where the monthly numbers come from,
 how each charge is calculated and what to produce - billflow does the rest, and **asks for confirmation before it writes anything**.
@@ -62,6 +62,30 @@ outputs:
   (`--yes` skips the question for scheduled runs).
 - The password is never stored in the config: set the `BILLFLOW_SMTP_PASSWORD` environment variable.
 - A client with a missing/invalid address or a failed send is reported and skipped; the others continue.
+## Licensing
+
+billflow runs in **trial mode** (up to 5 clients per run; previews are always unlimited) until a licence key is installed:
+
+```
+billflow license install <key>      # key text, or a file containing it
+billflow license status
+```
+
+Keys are signed offline (Ed25519) and name the customer, expiry date and client limit; they are checked on the customer's
+machine with no internet. Vendors create keys with `python tools/make_license.py "Customer" --expires 2027-10-31 --max-clients 50`
+using the private signing key, which is **never stored in this repository** (back it up safely - without it you cannot issue keys).
+Set `BILLFLOW_LICENSE` to supply a key through the environment instead.
+
+## More connectors
+
+| Type | Name | Use |
+|---|---|---|
+| source | `json` | JSON file or web API (`url`, `bearer_env` for a token, `records_path` for nested lists) |
+| source | `google_sheet` | Sheet shared by link: `sheet_id`, optional `tab` |
+| source | `sqlite` | Read-only `SELECT` from a database; may use `:period :year :month` |
+| rule | `percentage` | % of earlier charges, e.g. VAT (`percent`, optional `of: [names]`) |
+| rule | `tiered` | usage in bands: `tiers: [{up_to: 10, rate: 100}, {rate: 200}]` |
+| output | `json` | one JSON file per invoice, for importing elsewhere |
 ## Customising (plugins)
 
 ```python
@@ -85,4 +109,5 @@ new data sources (other websites, accounting systems, email) are added without t
 pip install -e ".[dev]"
 pytest
 ```
+
 

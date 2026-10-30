@@ -9,6 +9,7 @@ from openpyxl import load_workbook
 from billflow import cli
 from billflow.config import ConfigError, load_config
 from billflow.engine import commit, plan
+from billflow.models import BillingError
 from billflow.sample import init_workspace
 
 
@@ -169,3 +170,125 @@ def test_email_missing_address_is_reported_not_guessed(ws):
     run(ws, "--yes")
     rows = {r["Client"]: r for r in csv.DictReader(open(ws / "output/2026-11/summary.csv"))}
     assert sum(r["Status"] == "ERROR" for r in rows.values()) == 1
+
+
+# ---- licensing -------------------------------------------------------------------------------------------------
+
+@pytest.fixture
+def keys(monkeypatch, tmp_path):
+    from cryptography.hazmat.primitives import serialization as s
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from billflow import licensing
+    k = Ed25519PrivateKey.generate()
+    monkeypatch.setattr(licensing, "PUBLIC_KEY_HEX", k.public_key().public_bytes(s.Encoding.Raw, s.PublicFormat.Raw).hex())
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.delenv("BILLFLOW_LICENSE", raising=False)
+    pem = k.private_bytes(s.Encoding.PEM, s.PrivateFormat.PKCS8, s.NoEncryption())
+    return lambda customer="Acme", expires="2099-01-01", max_clients=0: licensing.sign(pem, customer, "standard", expires, max_clients)
+
+
+def _many_clients(ws, n):
+    rows = ["id,name,email,service_charge,water_rate,last_invoice"] + [f"C{i},Client {i},c{i}@x.test,1000,10,0" for i in range(n)]
+    (ws / "clients.csv").write_text("\n".join(rows), encoding="utf-8")
+    (ws / "readings-2026-11.csv").write_text("id,current,previous\n" + "\n".join(f"C{i},10,5" for i in range(n)), encoding="utf-8")
+
+
+def test_trial_blocks_runs_over_the_client_limit_but_allows_preview(ws, keys, capsys):
+    _many_clients(ws, 6)
+    assert run(ws, "--dry-run") == 0
+    assert run(ws, "--yes") == 4
+    assert not (ws / "output").exists()
+    assert "Trial mode" in capsys.readouterr().out
+
+
+def test_valid_key_lifts_limit_and_tampered_or_expired_keys_do_not(ws, keys, monkeypatch):
+    from billflow import licensing
+    _many_clients(ws, 6)
+    k = keys(max_clients=10)
+    assert licensing.install(k).customer == "Acme"
+    assert run(ws, "--yes") == 0
+    with pytest.raises(licensing.LicenseError):
+        licensing.verify(k[:-4] + "AAAA")
+    with pytest.raises(licensing.LicenseError):
+        licensing.verify(keys(expires="2020-01-01"))
+    assert licensing.current().valid
+
+
+def test_key_limit_is_enforced(ws, keys, monkeypatch):
+    monkeypatch.setenv("BILLFLOW_LICENSE", keys(max_clients=2))
+    assert run(ws, "--yes") == 4
+
+
+def test_license_cli_install_and_status(keys, capsys):
+    assert cli.main(["license", "install", keys("Beta Ltd")]) == 0
+    assert cli.main(["license", "status"]) == 0
+    assert "Beta Ltd" in capsys.readouterr().out
+    assert cli.main(["license", "install", "garbage"]) == 2
+
+
+# ---- more connectors -------------------------------------------------------------------------------------------
+
+def _edit(ws, fn):
+    import yaml
+    cfg = yaml.safe_load((ws / "config.yml").read_text(encoding="utf-8"))
+    fn(cfg)
+    (ws / "config.yml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+
+
+def _totals(ws):
+    return {r.client_id: r.invoice.total for r in plan(load_config(ws / "config.yml"), "2026-11")}
+
+
+def test_percentage_rule_adds_vat_on_earlier_charges(ws):
+    _edit(ws, lambda c: c["charges"].append({"rule": "percentage", "name": "VAT", "percent": 16}))
+    assert _totals(ws)["H1"] == Decimal("7354.40")        # 6340 x 1.16
+
+
+def test_tiered_rule_prices_usage_in_bands(ws):
+    def f(c):
+        c["charges"][1] = {"rule": "tiered", "name": "Water", "source": "water", "current_column": "current",
+                           "previous_column": "previous", "tiers": [{"up_to": 10, "rate": 100}, {"rate": 200}]}
+    _edit(ws, f)
+    assert _totals(ws)["H1"] == Decimal("4000") + 1000 + 600     # 13 units: 10 x 100 + 3 x 200
+
+
+def test_json_source_file_and_nested_records(ws):
+    import json
+    rows = list(csv.DictReader(open(ws / "readings-2026-11.csv")))
+    (ws / "r.json").write_text(json.dumps({"data": {"readings": rows}}), encoding="utf-8")
+    _edit(ws, lambda c: c["sources"].__setitem__("water", {"type": "json", "path": "r.json", "records_path": "data.readings", "key": "id"}))
+    assert _totals(ws)["H1"] == Decimal("6340.00")
+
+
+def test_sqlite_source_is_read_only_select(ws):
+    import sqlite3
+    con = sqlite3.connect(ws / "m.db")
+    con.execute("create table r(id text, current int, previous int)")
+    con.executemany("insert into r values (?,?,?)", [("H1", 817, 804), ("H2", 1500, 1480), ("A1", 18, 16)])
+    con.commit(); con.close()
+    _edit(ws, lambda c: c["sources"].__setitem__("water", {"type": "sqlite", "path": "m.db", "key": "id",
+                                                           "query": "select id, current, previous from r"}))
+    assert _totals(ws)["A1"] == Decimal("1060.00")
+    _edit(ws, lambda c: c["sources"]["water"].__setitem__("query", "delete from r"))
+    res = plan(load_config(ws / "config.yml"), "2026-11")
+    assert all(r.status == "ERROR" and "SELECT" in r.message for r in res)
+    assert sqlite3.connect(ws / "m.db").execute("select count(*) from r").fetchone()[0] == 3
+
+
+def test_google_sheet_source_builds_export_url(ws, monkeypatch):
+    from billflow.connectors import sources
+    seen = []
+    monkeypatch.setattr(sources, "_fetch", lambda url, p: seen.append(url) or (ws / "readings-2026-11.csv").read_text())
+    _edit(ws, lambda c: c["sources"].__setitem__("water", {"type": "google_sheet", "sheet_id": "abc123", "tab": "{month_name} {year}", "key": "id"}))
+    assert _totals(ws)["H1"] == Decimal("6340.00")
+    assert "abc123" in seen[0] and "sheet=November%202026" in seen[0]
+
+
+def test_json_output_file(ws):
+    import json
+    _edit(ws, lambda c: c["outputs"].append({"type": "json"}))
+    assert run(ws, "--yes") == 0
+    d = json.loads((ws / "output/2026-11/H1/invoice-H1.json").read_text())
+    assert d["invoice_no"] == "H1/13" and d["total"] == "6340.00"
+
+

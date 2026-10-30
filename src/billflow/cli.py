@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 
 from .config import ConfigError, load_config
@@ -30,7 +31,27 @@ def main(argv=None):
                        help="actually send emails (otherwise they are only saved as .eml drafts)")
     p_run.add_argument("--force", action="store_true", help="re-issue clients already invoiced for the period")
     p_run.add_argument("--only", default="", help="comma-separated client ids")
+    p_lic = sub.add_parser("license", help="show or install a licence key")
+    lsub = p_lic.add_subparsers(dest="lcmd", required=True)
+    lsub.add_parser("status", help="show the active licence")
+    p_inst = lsub.add_parser("install", help="install a licence key (the text or a file containing it)")
+    p_inst.add_argument("key")
     args = ap.parse_args(argv)
+
+    if args.cmd == "license":
+        from . import licensing
+        if args.lcmd == "status":
+            print(licensing.current().describe())
+            return 0
+        key = args.key
+        if os.path.isfile(key):
+            key = open(key, encoding="utf-8").read()
+        try:
+            print("Installed. " + licensing.install(key).describe())
+        except licensing.LicenseError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 2
+        return 0
 
     if args.cmd == "init":
         from .sample import init_workspace
@@ -46,6 +67,15 @@ def main(argv=None):
         print(f"Error: {e}", file=sys.stderr)
         return 2
     _show(results)
+    from . import licensing
+    lic = licensing.current()
+    n_ok = sum(r.status == "OK" for r in results)
+    if not lic.valid or lic.max_clients:
+        print(lic.describe())
+    if lic.max_clients and n_ok > lic.max_clients and not args.dry_run:
+        print(f"Error: this run has {n_ok} clients but your licence allows {lic.max_clients}. "
+              "Nothing was written. Contact your supplier to upgrade.", file=sys.stderr)
+        return 4
     if args.dry_run or not any(r.status == "OK" for r in results):
         print("Dry run - nothing was written." if args.dry_run else "Nothing to do.")
         return 0

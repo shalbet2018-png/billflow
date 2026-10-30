@@ -11,3 +11,6 @@ billflow-state.json
 dist/
 installer-out/
 *.spec
+
+*.pem
+signing-key*
