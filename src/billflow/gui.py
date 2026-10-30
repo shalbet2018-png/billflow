@@ -413,7 +413,7 @@ class App:
         if THEME == "neon":
             c.create_text(42, 44, text="BILLFLOW", anchor="w", font=(FONT, 38, "bold"), fill=CYAN)
             c.create_text(39, 42, text="BILLFLOW", anchor="w", font=(FONT, 38, "bold"), fill=MAG)
-            c.create_text(44, 84, text="// MONTHLY INVOICES  //  CHECKED BEFORE ANYTHING IS SAVED", anchor="w",
+            c.create_text(44, 84, text="// NEURAL LEDGER INTERFACE  v0.2  //  ACCOUNTS BOT ONLINE", anchor="w",
                           font=(FONT, 10), fill=GREEN)
         else:
             c.create_rectangle(0, 0, W, 100, fill=BG, outline="", tags="mask")     # clean black sky for the grid

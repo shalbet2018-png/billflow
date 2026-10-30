@@ -11,7 +11,7 @@ BILLFLOW prepares your monthly invoices and client ledgers from the files you al
 
 ## 2. Install
 
-1. Run `billflow-setup-0.1.0.exe` and follow the steps.
+1. Run `billflow-setup-0.2.0.exe` and follow the steps.
 2. Open BILLFLOW from the Start menu. You will see the main screen.
 3. Press Enter licence key (top right), paste the key we sent you (or press Open key file...), then Save key. The top right of the screen shows your licence.
 4. Want to look around first? Press Try with sample data, then Check invoices. It uses made-up clients.

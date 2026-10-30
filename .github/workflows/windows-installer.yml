@@ -1,0 +1,74 @@
+name: Windows installer
+
+# Builds billflow-setup-<version>.exe on a Windows machine at GitHub.
+# - Every push to main: the installer is attached to the run (Actions tab > run > Artifacts).
+# - A version tag (e.g. v0.2.0): the installer is also published as a GitHub Release, ready to download.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install billflow and build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pyinstaller pytest
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Build the command-line program
+        run: pyinstaller --noconfirm --clean --name billflow --collect-data docx --collect-data reportlab packaging_entry.py
+
+      - name: Build the desktop screen
+        run: pyinstaller --noconfirm --clean --windowed --name billflow-gui --collect-data docx --collect-data reportlab gui_entry.py
+
+      - name: Smoke test the built program (sample data, preview only)
+        shell: pwsh
+        run: |
+          $env:APPDATA = "$env:RUNNER_TEMP\appdata"
+          .\dist\billflow\billflow.exe init "$env:RUNNER_TEMP\demo"
+          .\dist\billflow\billflow.exe run --config "$env:RUNNER_TEMP\demo\config.yml" --period 2026-11 --dry-run
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\dist\billflow\billflow.exe run --config "$env:RUNNER_TEMP\demo\config.yml" --period 2026-11 --yes
+          if (-not (Test-Path "$env:RUNNER_TEMP\demo\output\2026-11\H1\invoice-H1.pdf")) { throw "No PDF invoice was created" }
+          if (-not (Test-Path ".\dist\billflow-gui\billflow-gui.exe")) { throw "Desktop program missing" }
+
+      - name: Make the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc installer\billflow.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem installer-out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: billflow-installer
+          path: installer-out/*.exe
+
+      - name: Publish release (version tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer-out/*.exe
+          body: |
+            BILLFLOW Windows installer. Download billflow-setup-*.exe, run it, then open BILLFLOW from the Start menu or desktop.
+            See docs/GUIDE.md (or the Business Guide in the Start menu) for the monthly routine.
