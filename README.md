@@ -137,7 +137,7 @@ new data sources (other websites, accounting systems, email) are added without t
 
 ## App icon
 
-`src/billflow/assets/billflow.ico` (and `.png`) is the neon **B** icon used by the programs, shortcuts, installer and
+`src/billflow/assets/billflow.ico` (and `.png`) is the Tron feather-pen icon (glowing quill, light-grid, binary belt, orange ink) used by the programs, shortcuts, installer and
 window title bar. To change it, edit and run `python tools/make_icon.py`.
 
 ## Tests
