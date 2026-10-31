@@ -855,8 +855,19 @@ class App:
         self.root.after(100, self._poll)
 
 
+def set_window_icon(root):
+    """Puts the BILLFLOW icon in the title bar and taskbar (for every window, including the wizard)."""
+    try:
+        from importlib.resources import files
+        root._billflow_icon = tk.PhotoImage(file=str(files("billflow") / "assets" / "billflow.png"))
+        root.iconphoto(True, root._billflow_icon)
+    except (OSError, tk.TclError, ModuleNotFoundError):
+        pass                                                   # no icon is not worth stopping for
+
+
 def main():
     root = tk.Tk()
+    set_window_icon(root)
     App(root)
     root.mainloop()
     return 0

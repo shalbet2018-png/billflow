@@ -13,6 +13,9 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 Compression=lzma2
 SolidCompression=yes
+SetupIconFile=..\src\billflow\assets\billflow.ico
+UninstallDisplayIcon={app}\gui\billflow-gui.exe
+WizardStyle=modern
 ChangesEnvironment=yes
 
 [Files]

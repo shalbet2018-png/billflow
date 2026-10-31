@@ -135,6 +135,11 @@ def late_fee(client, params, ctx):
 Then use `- rule: late_fee` under `charges`. Sources (`@source`) and outputs (`@output`) work the same way - this is how
 new data sources (other websites, accounting systems, email) are added without touching the core.
 
+## App icon
+
+`src/billflow/assets/billflow.ico` (and `.png`) is the neon **B** icon used by the programs, shortcuts, installer and
+window title bar. To change it, edit and run `python tools/make_icon.py`.
+
 ## Tests
 
 ```

@@ -31,10 +31,10 @@ jobs:
         run: python -m pytest -q
 
       - name: Build the command-line program
-        run: pyinstaller --noconfirm --clean --name billflow --collect-data docx --collect-data reportlab packaging_entry.py
+        run: pyinstaller --noconfirm --clean --name billflow --icon src/billflow/assets/billflow.ico --collect-data billflow --collect-data docx --collect-data reportlab packaging_entry.py
 
       - name: Build the desktop screen
-        run: pyinstaller --noconfirm --clean --windowed --name billflow-gui --collect-data docx --collect-data reportlab gui_entry.py
+        run: pyinstaller --noconfirm --clean --windowed --name billflow-gui --icon src/billflow/assets/billflow.ico --collect-data billflow --collect-data docx --collect-data reportlab gui_entry.py
 
       - name: Smoke test the built program (sample data, preview only)
         shell: pwsh
@@ -46,6 +46,7 @@ jobs:
           .\dist\billflow\billflow.exe run --config "$env:RUNNER_TEMP\demo\config.yml" --period 2026-11 --yes
           if (-not (Test-Path "$env:RUNNER_TEMP\demo\output\2026-11\H1\invoice-H1.pdf")) { throw "No PDF invoice was created" }
           if (-not (Test-Path ".\dist\billflow-gui\billflow-gui.exe")) { throw "Desktop program missing" }
+          if (-not (Get-ChildItem .\dist\billflow-gui -Recurse -Filter billflow.png)) { throw "Window icon not bundled" }
 
       - name: Make the installer
         shell: pwsh

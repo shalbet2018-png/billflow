@@ -64,7 +64,9 @@ def main(argv=None):
             return 0
         import tkinter as tk
         from .wizard_gui import open_wizard
+        from .gui import set_window_icon
         root = tk.Tk()
+        set_window_icon(root)
         root.withdraw()
         open_wizard(root, lambda path, period: print(path)).win.wait_window()
         root.destroy()

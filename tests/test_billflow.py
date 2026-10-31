@@ -485,3 +485,23 @@ def test_gui_change_setup_reopens_the_wizard_with_saved_answers(ws, monkeypatch)
         w.win.destroy()
     finally:
         root.destroy()
+
+
+def test_app_icon_ships_with_the_package_and_loads():
+    import tkinter as tk
+    from importlib.resources import files
+    from billflow import gui
+    ico = files("billflow") / "assets" / "billflow.ico"
+    assert ico.is_file() and (files("billflow") / "assets" / "billflow.png").is_file()
+    from PIL import Image
+    sizes = Image.open(str(ico)).info.get("sizes", set())
+    assert {(16, 16), (32, 32), (48, 48), (256, 256)} <= set(sizes)        # Windows needs the small and large ones
+    try:
+        root = tk.Tk()
+    except tk.TclError:
+        pytest.skip("no display")
+    try:
+        gui.set_window_icon(root)
+        assert root._billflow_icon.width() == 256
+    finally:
+        root.destroy()
