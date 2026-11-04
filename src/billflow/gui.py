@@ -448,6 +448,7 @@ class App:
         styled_button(r2, "New setup", self.open_wizard, MAG).pack(side="left")
         styled_button(r2, "Change my setup", self.change_setup, MAG).pack(side="left", padx=(8, 0))
         styled_button(r2, "Try with sample data", self.make_demo, MUTED).pack(side="left", padx=(8, 0))
+        styled_button(r2, "Scan a document...", self.scan_document, MUTED).pack(side="left", padx=(8, 0))
         self._fill_setups()
 
         # steps 2-4
@@ -703,6 +704,22 @@ class App:
         except (ConfigError, OSError, ValueError) as e:
             messagebox.showerror("BILLFLOW", f"This setup could not be opened for changes:\n\n{e}")
             return None
+
+    def scan_document(self):
+        from .documents import FILE_TYPES, read_document
+        p = filedialog.askopenfilename(title="Choose a Word, Excel, PowerPoint or PDF document to scan",
+                                       filetypes=FILE_TYPES)
+        if not p:
+            return
+        try:
+            text = read_document(p)
+        except BillingError as e:
+            messagebox.showerror("BILLFLOW", str(e))
+            return
+        self.clear_log()
+        self.say(f"Scanned {os.path.basename(p)} ({len(text.split())} words):", "ok")
+        for line in text.splitlines()[:200]:
+            self.say(line)
 
     def make_demo(self):
         from .sample import init_workspace
