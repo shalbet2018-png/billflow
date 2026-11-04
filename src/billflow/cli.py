@@ -34,6 +34,8 @@ def main(argv=None):
     p_run.add_argument("--force", action="store_true", help="re-issue clients already invoiced for the period")
     p_run.add_argument("--only", default="", help="comma-separated client ids")
     sub.add_parser("gui", help="open the desktop screen")
+    p_scan = sub.add_parser("scan", help="read a Word, Excel, PowerPoint or PDF document and print its text")
+    p_scan.add_argument("file", nargs="?", help="the document (omit to pick one in a file window)")
     p_set = sub.add_parser("setup", help="guided setup of a new business (opens the wizard)")
     p_set.add_argument("--answers", help="JSON file of answers: write the setup without opening the screen")
     p_set.add_argument("--folder", help="where to save the setup (with --answers)")
@@ -47,6 +49,26 @@ def main(argv=None):
     if args.cmd == "gui":
         from .gui import main as gui_main
         return gui_main()
+
+    if args.cmd == "scan":
+        from .documents import FILE_TYPES, read_document
+        path = args.file
+        if not path:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            path = filedialog.askopenfilename(title="Choose a document to scan", filetypes=FILE_TYPES)
+            root.destroy()
+            if not path:
+                print("Cancelled.")
+                return 1
+        try:
+            print(read_document(path))
+        except BillingError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 2
+        return 0
 
     if args.cmd == "setup":
         if args.answers:

@@ -7,7 +7,7 @@ name = "billflow"
 version = "0.2.0"
 description = "Configurable monthly invoicing and ledger automation for property managers and small businesses"
 requires-python = ">=3.9"
-dependencies = ["openpyxl>=3.1", "python-docx>=1.1", "pyyaml>=6", "reportlab>=4", "cryptography>=42"]
+dependencies = ["openpyxl>=3.1", "python-docx>=1.1", "pyyaml>=6", "reportlab>=4", "cryptography>=42", "pypdf>=4"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
