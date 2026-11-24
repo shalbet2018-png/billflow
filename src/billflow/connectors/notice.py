@@ -39,7 +39,8 @@ def check_notice(invoice, params, ctx):
     if not params.get("template") or not template.exists():
         raise BillingError(f"Notice template not found: {template}")
     owed = arrears(invoice)
-    if owed > _limit(params):
+    invoice.notice_due = owed > _limit(params)
+    if invoice.notice_due:
         return [f"arrears {owed:,.2f}: notice will be written"]
     return []
 

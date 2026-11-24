@@ -7,7 +7,7 @@ from .engine import commit, plan
 from .models import BillingError
 
 
-def _show(results):
+def _show(results, currency=""):
     print(f"\n{'Client':<12}{'Name':<24}{'Status':<9}{'Invoice':<12}{'Total':>12}  Notes")
     for r in results:
         total = f"{r.invoice.total:,.2f}" if r.invoice else ""
@@ -15,6 +15,9 @@ def _show(results):
     ok = sum(r.status == "OK" for r in results)
     print(f"\n{ok} ready, {sum(r.status == 'ERROR' for r in results)} need attention, "
           f"{sum(r.status == 'SKIPPED' for r in results)} already done.")
+    if ok:
+        from .report import totals_line
+        print(totals_line(results, currency))
 
 
 def main(argv=None):
@@ -122,7 +125,7 @@ def main(argv=None):
     except (ConfigError, BillingError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2
-    _show(results)
+    _show(results, cfg["company"].get("currency", ""))
     from . import licensing
     lic = licensing.current()
     n_ok = sum(r.status == "OK" for r in results)
@@ -153,7 +156,7 @@ def main(argv=None):
             cfg["_send_emails"] = False
             print("Emails will only be saved as drafts.")
     summary = commit(cfg, args.period, results)
-    print(f"Done. Summary: {summary}")
+    print(f"Done. Summary: {summary.with_suffix('.xlsx')} (also {summary.name})")
     return 0 if all(r.status != "ERROR" for r in results) else 3
 
 

@@ -332,3 +332,52 @@ def test_new_rows_continue_from_the_real_balance_when_an_empty_row_sits_above_th
     assert _run(estate, "--yes") == 0
     ws = load_workbook(path).active
     assert ws["B14"].value == "Invoice U1/2" and ws["F14"].value == "=F12+D14-E14" and ws["F15"].value == "=F14"
+
+
+# ---------------------------------------------------------------- month summary
+
+def test_run_writes_a_month_summary_with_figures_clients_and_problems(estate, capsys):
+    _with_notices(estate)
+    cfg = (estate / "config.yml").read_text(encoding="utf-8").replace(
+        "charges:", "  payments: {type: csv, path: \"payments-{period}.csv\", key: id}\npayments: {source: payments}\ncharges:", 1)
+    (estate / "config.yml").write_text(cfg, encoding="utf-8")
+    (estate / "payments-2026-11.csv").write_text(
+        "id,date,reference,amount\nU1,2026-11-10,PMT#5,1000\nU9,2026-11-12,PMT#6,250\n", encoding="utf-8")
+    assert _run(estate, "--yes") == 3                                       # finished, but something needs attention
+    out = capsys.readouterr().out
+    assert "Billed KES 13,880.00 on 2 invoice(s) | 1 payment(s) KES 1,000.00 | owed after this month KES 14,880.00 " \
+           "| 1 arrears notice(s)" in out
+    wb = load_workbook(estate / "output" / "2026-11" / "summary.xlsx")
+    s = wb["Summary"]
+    head = {s.cell(r, 1).value: s.cell(r, 3).value for r in range(4, 13)}
+    assert head["Invoices made"] == 2 and head["Total billed (KES)"] == 13880 and head["Payments received (KES)"] == 1000
+    assert head["Owed after this month (KES)"] == 14880 and head["Arrears notices written"] == 1
+    assert head["Need attention (not invoiced)"] == 1
+    rows = [[c.value for c in r] for r in s.iter_rows(min_row=15) if r[0].value]
+    assert rows[0][:3] == ["Unit", "Name", "Status"]
+    assert rows[1][:3] == ["U9", "(not in client list)", "Needs attention"]
+    assert rows[2][:9] == ["U1", "Ann Demo", "Invoiced", "U1/2", 8800, 1000, 8800, None, None]
+    assert rows[3][:9] == ["U2", "Ben Demo", "Invoiced", "U2/8", 5080, None, 6080, 1000, "Yes"]
+    assert rows[4][0] == "Total" and rows[4][4:7] == [13880, 1000, 14880]
+    att = wb["Needs attention"]
+    assert att["A2"].value == "U9" and "not in your client list" in att["C2"].value and "unit number" in att["D2"].value
+    csv_rows = (estate / "output" / "2026-11" / "summary.csv").read_text(encoding="utf-8").splitlines()
+    assert csv_rows[0].endswith("Paid,Balance after,Notice") and csv_rows[2].endswith(",6080.00,yes")
+
+
+def test_preview_prints_totals_and_writes_nothing(estate, capsys):
+    assert _run(estate, "--dry-run") == 0
+    assert "Billed KES 13,880.00 on 2 invoice(s) | owed after this month KES 15,880.00" in capsys.readouterr().out
+    assert not (estate / "output").exists()
+
+
+def test_fractions_of_a_cent_in_old_statement_figures_do_not_count_as_arrears(estate):
+    _with_notices(estate, limit=0)
+    for cid, name in (("U1", "Ann Demo"), ("U2", "Ben Demo")):
+        path = estate / "units" / f"{name}_{cid}" / f"Block - {cid} - {name}.xlsx"
+        wb = load_workbook(path)
+        wb.active["E12"] = 1499.998                       # pays the 1,500 invoice, leaving 0.002 on the books
+        wb.save(path)
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U1"].invoice.balance == Decimal("8800.00") and not res["U1"].invoice.notice_due
+    assert "notice" not in res["U1"].message

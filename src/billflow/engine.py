@@ -175,8 +175,14 @@ def commit(cfg, period, results):
     summary.parent.mkdir(parents=True, exist_ok=True)
     with open(summary, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
-        w.writerow(["Client", "Name", "Status", "Invoice", "Total", "Notes"])
+        w.writerow(["Client", "Name", "Status", "Invoice", "Total", "Notes", "Paid", "Balance after", "Notice"])
         for r in results:
+            inv = r.invoice if r.status == "OK" else None
             w.writerow([r.client_id, r.client_name, r.status, r.invoice.number if r.invoice else "",
-                        f"{r.invoice.total:.2f}" if r.invoice else "", r.message])
+                        f"{r.invoice.total:.2f}" if r.invoice else "", r.message,
+                        f"{sum(p.amount for p in inv.payments):.2f}" if inv and inv.payments else "",
+                        f"{inv.balance:.2f}" if inv and inv.balance is not None else "",
+                        "yes" if inv and inv.notice_due else ""])
+    from .report import write_workbook
+    write_workbook(summary.with_suffix(".xlsx"), cfg, period, results)
     return summary

@@ -147,6 +147,46 @@ def explain(message, cfg=None, period="", client_id=""):
         return Explanation(f"The Word invoice template '{Path(m.group(1)).name}' is missing.",
                            "Put the template back, or press Change my setup and choose it again.")
 
+    m = re.fullmatch(r"Statement not found: (.+)", msg)
+    if m:
+        p = Path(m.group(1))
+        return Explanation(f"{who}'s statement '{p.name}' could not be found.",
+                           f"Check that the statement file name in your client list matches the file in {who}'s folder exactly, "
+                           "save the client list, then press Check invoices again.", str(p.parent) if p.parent.exists() else "")
+
+    m = re.fullmatch(r"(.+) already has a row for (.+)", msg)
+    if m:
+        return Explanation(f"{who}'s statement already shows {m.group(2)}.",
+                           "If this month was already entered by hand, nothing needs doing. Otherwise check the invoice number "
+                           "in your client list (last invoice column).")
+
+    m = re.fullmatch(r"(.+): balance cannot be worked out - (.+)", msg)
+    if m:
+        return Explanation(f"The balance on {who}'s statement ({m.group(1)}) cannot be worked out: {m.group(2)}.",
+                           "Open the statement and check the Balance column above the 'Total must equal' row, "
+                           "then press Check invoices again.")
+
+    m = re.fullmatch(r"No previous (.+) reading: (.+)", msg)
+    if m:
+        return Explanation(f"Last month's {m.group(1)} reading for {who} is missing ({m.group(2)}).",
+                           "Make sure last month's readings file is in the folder and has this unit's current reading, "
+                           "or type the previous reading into this month's file, then press Check invoices again.")
+
+    m = re.fullmatch(r"Payments of (.+) for unit (.+), which is not in the client list", msg)
+    if m:
+        return Explanation(f"This month's payments file has {m.group(1)} paid for unit {m.group(2)}, "
+                           "which is not in your client list.",
+                           "Check the unit number on those payments (it may be a typing mistake), or add the client to "
+                           "your client list, then press Check invoices again.", _source_file(cfg, ((cfg or {}).get("payments") or {}).get("source", "payments"), period))
+
+    if re.search(r"(?i)payment", msg):
+        return Explanation(f"A payment for {who} has a problem: {msg}",
+                           "Correct the row in this month's payments file, save it, then press Check invoices again.",
+                           _source_file(cfg, ((cfg or {}).get("payments") or {}).get("source", "payments"), period))
+
+    if msg.startswith("Arrears notices need") or msg.startswith("Notice template not found"):
+        return Explanation(msg, "Press Change my setup, or ask whoever set up BILLFLOW to fix the notice settings.")
+
     if msg == "No charges calculated":
         return Explanation(f"Nothing to charge {who} this month (every charge came to nothing).",
                            "If that is wrong, check this client's rows in your files.")

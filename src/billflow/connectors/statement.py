@@ -176,7 +176,9 @@ def check_statement(invoice, params, ctx):
         before = statement_balance(ws, total_row, cols["balance"])
     except BillingError as e:
         raise BillingError(f"{path.name}: balance cannot be worked out - {e}")
-    invoice.balance = before + sum((e[4] or 0) - (e[5] or 0) for e in entries)
+    from decimal import Decimal
+    # Excel keeps amounts as binary fractions (e.g. 23771.510000000002), so balances are rounded to cents
+    invoice.balance = (before + sum((e[4] or 0) - (e[5] or 0) for e in entries)).quantize(Decimal("0.01"))
     notes = [f"balance after: {invoice.balance:,.2f}"]
     if already:
         notes.append(f"already on the statement, not added again: {', '.join(already)}")
