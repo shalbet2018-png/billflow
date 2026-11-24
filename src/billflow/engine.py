@@ -128,13 +128,13 @@ def plan(cfg, period, only=None, force=False):
             if payments.enabled(cfg):
                 inv.payments = payments.client_payments(cfg, ctx, cid)
             notes = []
+            if inv.payments:
+                paid = sum((p.amount for p in inv.payments), Decimal(0))
+                notes.append(f"{len(inv.payments)} payment(s) received: {paid:,.2f}")
             for out in cfg["outputs"]:
                 check = CHECKS.get(out.get("type"))
                 if check:
                     notes += check(inv, out, ctx) or []
-            if inv.payments and not notes:
-                paid = sum((p.amount for p in inv.payments), Decimal(0))
-                notes.append(f"{len(inv.payments)} payment(s) received: {paid:,.2f}")
             results.append(Result(cid, name, "OK", inv, "; ".join(notes)))
         except BillingError as e:
             results.append(Result(cid, name, "ERROR", message=str(e)))

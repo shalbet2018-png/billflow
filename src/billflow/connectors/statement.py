@@ -54,6 +54,64 @@ def insert_rows_keep_layout(ws, at, by=1):
         ws.print_area = shift_rows_in_formula(ws.print_area.split("!")[-1], at, by)
 
 
+_TERM = re.compile(r"([+-]?)\s*(?:(\$?[A-Za-z]{1,3}\$?\d+)|(\d+(?:\.\d+)?))\s*")
+
+
+def _plain_number(value, where):
+    from decimal import Decimal, InvalidOperation
+    if value is None or isinstance(value, bool):
+        return Decimal(0)
+    if isinstance(value, (int, float)):
+        return Decimal(str(value))
+    text = str(value).strip().replace(",", "")
+    if text in ("", "-", "--"):
+        return Decimal(0)
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        raise BillingError(f"cell {where} holds {value!r}, which is not an amount")
+
+
+def _cell_amount(ws, ref, seen):
+    """Value of a cell, working out simple +/- formulas such as =F75+D76-E76 the way Excel would."""
+    from decimal import Decimal
+    ref = ref.replace("$", "").upper()
+    if ref in seen:
+        raise BillingError(f"cell {ref} refers to itself")
+    v = ws[ref].value
+    if isinstance(v, str) and v.startswith("="):
+        body, pos, total = v[1:].replace(" ", ""), 0, Decimal(0)
+        if not body:
+            return Decimal(0)
+        while pos < len(body):
+            m = _TERM.match(body, pos)
+            if not m or m.end() == pos:
+                raise BillingError(f"cell {ref} has a formula BILLFLOW cannot work out: {v}")
+            part = _cell_amount(ws, m.group(2), seen | {ref}) if m.group(2) else Decimal(m.group(3))
+            total += -part if m.group(1) == "-" else part
+            pos = m.end()
+        return total
+    return _plain_number(v, ref)
+
+
+def balance_anchor(ws, total_row, balance_col="F"):
+    """The row whose balance the statement total shows (normally the last entry above the total row)."""
+    m = re.fullmatch(r"=\$?%s\$?(\d+)" % balance_col, str(ws[f"{balance_col}{total_row}"].value or "").replace(" ", ""),
+                     re.IGNORECASE)
+    if m and int(m.group(1)) < total_row:
+        return int(m.group(1))
+    for r in range(total_row - 1, 0, -1):
+        v = ws[f"{balance_col}{r}"].value
+        if isinstance(v, (int, float)) or (isinstance(v, str) and v.startswith("=")):
+            return r
+    raise BillingError("no balance found above the total row")
+
+
+def statement_balance(ws, total_row, balance_col="F"):
+    """The statement's current balance, worked out from its own figures."""
+    return _cell_amount(ws, f"{balance_col}{balance_anchor(ws, total_row, balance_col)}", frozenset())
+
+
 def _cols(params):
     names = {"date": "A", "reference": "B", "deposit_by": "C", "debit": "D", "credit": "E", "balance": "F"}
     return {k: str(params.get(f"{k}_column", d)).upper() for k, d in names.items()}
@@ -113,10 +171,16 @@ def _entries(invoice, params, ref, existing):
 @output_check("statement_xlsx")
 def check_statement(invoice, params, ctx):
     path, wb, ws, cols, total_row, ref, existing = _open(invoice, params, ctx)
-    _, already = _entries(invoice, params, ref, existing)
+    entries, already = _entries(invoice, params, ref, existing)
+    try:
+        before = statement_balance(ws, total_row, cols["balance"])
+    except BillingError as e:
+        raise BillingError(f"{path.name}: balance cannot be worked out - {e}")
+    invoice.balance = before + sum((e[4] or 0) - (e[5] or 0) for e in entries)
+    notes = [f"balance after: {invoice.balance:,.2f}"]
     if already:
-        return [f"already on the statement, not added again: {', '.join(already)}"]
-    return []
+        notes.append(f"already on the statement, not added again: {', '.join(already)}")
+    return notes
 
 
 @output("statement_xlsx")
@@ -128,6 +192,7 @@ def statement_xlsx(invoice, params, ctx):
     shutil.copy2(path, backup)
 
     last, n = total_row - 1, len(entries)
+    anchor = balance_anchor(ws, total_row, cols["balance"])
     insert_rows_keep_layout(ws, total_row, n)
     bal, deb, cre = cols["balance"], cols["debit"], cols["credit"]
     for i, (when, _, reference, deposit_by, debit, credit) in enumerate(entries):
@@ -145,9 +210,9 @@ def statement_xlsx(invoice, params, ctx):
             ws[f"{deb}{r}"] = float(debit)
         if credit is not None:
             ws[f"{cre}{r}"] = float(credit)
-        ws[f"{bal}{r}"] = f"={bal}{r - 1}+{deb}{r}-{cre}{r}"
+        ws[f"{bal}{r}"] = f"={bal}{anchor if i == 0 else r - 1}+{deb}{r}-{cre}{r}"
     total_cell = ws[f"{bal}{total_row + n}"]
-    if _norm(total_cell.value) == _norm(f"={bal}{last}"):
+    if _norm(total_cell.value) in (_norm(f"={bal}{last}"), _norm(f"={bal}{anchor}"), ""):
         total_cell.value = f"={bal}{total_row + n - 1}"
     if params.get("as_at_cell"):
         ws[params["as_at_cell"]] = datetime.combine(period_end(invoice.period), datetime.min.time())

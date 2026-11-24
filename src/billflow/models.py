@@ -41,6 +41,7 @@ class Invoice:
     lines: List[Line] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     payments: list = field(default_factory=list)   # payments.Payment received during the month
+    balance: Decimal = None                          # statement balance after this month, when a statement is kept
 
     @property
     def total(self) -> Decimal:

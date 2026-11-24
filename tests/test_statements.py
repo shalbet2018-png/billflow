@@ -207,7 +207,8 @@ def _with_payments(estate, rows):
 def test_payments_go_into_the_statement_in_date_order_with_the_invoice(estate):
     _with_payments(estate, "U1,20/11/2026,PMT#900 & P050/01,3000,Ann\nU1,2026-11-03,PMT#880 & P041/02,\"1,500\",\n")
     res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
-    assert res["U1"].message == "2 payment(s) received: 4,500.00" and res["U2"].message == ""
+    assert res["U1"].message == "2 payment(s) received: 4,500.00; balance after: 5,300.00"
+    assert res["U2"].message == "balance after: 6,080.00"
     assert _run(estate, "--yes") == 0
     ws = load_workbook(estate / "units" / "Ann Demo_U1" / "Block - U1 - Ann Demo.xlsx").active
     got = [[ws.cell(r, c).value for c in range(1, 7)] for r in (13, 14, 15)]
@@ -256,3 +257,78 @@ def test_missing_payments_file_is_reported(estate):
     (estate / "payments-2026-11.csv").unlink()
     res = plan(load_config(estate / "config.yml"), "2026-11")
     assert {r.status for r in res} == {"ERROR"} and all("payments-2026-11.csv" in r.message for r in res)
+
+
+# ---------------------------------------------------------------- balances and arrears notices
+
+def _with_notices(estate, limit=500, days=4):
+    doc = Document()
+    doc.add_paragraph("{{notice_date}}")
+    doc.add_paragraph("TO:{{client_name_upper}}  UNIT NO. {{client_id}}")
+    p = doc.add_paragraph("Dear {{first_name}}, ")
+    p.add_run("RE: NOTICE TO CLEAR ARREARS OF KSH {{arrears}}.").bold = True
+    doc.add_paragraph("Please clear on or before {{deadline}}.")
+    doc.save(str(estate / "notice.docx"))
+    cfg = (estate / "config.yml").read_text(encoding="utf-8") + (
+        f"  - {{type: notice_docx, template: notice.docx, arrears_above: {limit}, pay_within_days: {days},\n"
+        "     path: \"../units/{client_folder}/Notice to {client_name} {period}.docx\"}\n")
+    (estate / "config.yml").write_text(cfg, encoding="utf-8")
+
+
+def test_notice_is_written_when_earlier_months_are_unpaid(estate):
+    _with_notices(estate)
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U1"].message == "balance after: 9,800.00; arrears 1,000.00: notice will be written"
+    assert _run(estate, "--yes") == 0
+    doc = Document(str(estate / "units" / "Ann Demo_U1" / "Notice to Ann Demo 2026-11.docx"))
+    text = [p.text for p in doc.paragraphs]
+    assert text == ["1ST DECEMBER 2026", "TO:ANN DEMO  UNIT NO. U1",
+                    "Dear Ann, RE: NOTICE TO CLEAR ARREARS OF KSH 1,000.", "Please clear on or before 5th December 2026."]
+    assert doc.paragraphs[2].runs[1].bold
+
+
+def test_no_notice_when_payments_cover_the_arrears_or_it_is_under_the_limit(estate):
+    _with_notices(estate, limit=500)
+    cfg = (estate / "config.yml").read_text(encoding="utf-8").replace(
+        "charges:", "  payments: {type: csv, path: \"payments-{period}.csv\", key: id}\npayments: {source: payments}\ncharges:", 1)
+    (estate / "config.yml").write_text(cfg, encoding="utf-8")
+    (estate / "payments-2026-11.csv").write_text("id,date,reference,amount\nU1,2026-11-10,PMT#5,1000\n", encoding="utf-8")
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert "notice" not in res["U1"].message and "notice will be written" in res["U2"].message
+    _run(estate, "--yes")
+    assert not (estate / "units" / "Ann Demo_U1" / "Notice to Ann Demo 2026-11.docx").exists()
+    assert (estate / "units" / "Ben Demo_U2" / "Notice to Ben Demo 2026-11.docx").exists()
+
+
+def test_notice_needs_the_statement_first(estate):
+    _with_notices(estate)
+    cfg = (estate / "config.yml").read_text(encoding="utf-8").replace(
+        '  - {type: statement_xlsx, path: "../units/{client_folder}/{client_statement}", as_at_cell: F4}\n', "")
+    (estate / "config.yml").write_text(cfg, encoding="utf-8")
+    res = plan(load_config(estate / "config.yml"), "2026-11")
+    assert {r.status for r in res} == {"ERROR"} and "statement_xlsx output listed before" in res[0].message
+
+
+def test_balance_uses_typed_figures_blank_rows_and_the_row_the_total_points_to(estate):
+    from billflow.connectors.statement import statement_balance
+    path = estate / "units" / "Ann Demo_U1" / "Block - U1 - Ann Demo.xlsx"
+    wb = load_workbook(path)
+    ws = wb.active
+    ws["F11"], ws["D12"], ws["E12"], ws["F12"] = 2500, "-", "1,000", "=F11+D12-E12"   # typed balance, text amounts
+    ws.insert_rows(13)                                                                # an empty row above the total
+    ws["F14"] = "=F12"
+    assert statement_balance(ws, 14) == Decimal("1500")
+    ws["F12"] = "=SUM(D11:D12)"
+    with pytest.raises(Exception, match="cannot work out"):
+        statement_balance(ws, 14)
+
+
+def test_new_rows_continue_from_the_real_balance_when_an_empty_row_sits_above_the_total(estate):
+    path = estate / "units" / "Ann Demo_U1" / "Block - U1 - Ann Demo.xlsx"
+    wb = load_workbook(path)
+    wb.active.insert_rows(13)
+    wb.active["F14"], wb.active["F6"] = "=F12", "=F14"
+    wb.save(path)
+    assert _run(estate, "--yes") == 0
+    ws = load_workbook(path).active
+    assert ws["B14"].value == "Invoice U1/2" and ws["F14"].value == "=F12+D14-E14" and ws["F15"].value == "=F14"
