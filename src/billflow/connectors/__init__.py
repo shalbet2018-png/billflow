@@ -1,1 +1,1 @@
-from . import accounting, outputs, rules, sources  # noqa: F401  (importing registers the built-in pieces)
+from . import accounting, office, outputs, rules, sources, statement  # noqa: F401  (importing registers the built-in pieces)

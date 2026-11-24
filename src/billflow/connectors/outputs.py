@@ -14,9 +14,20 @@ def _money(v):
     return f"{Decimal(v):,.2f}"
 
 
+def path_fields(invoice, ctx):
+    """Values a file path may use: {client_id} {client_name} {client_<column>} {seq} {invoice_no} and the period ones."""
+    fields = {f"client_{k}": safe_name(v) for k, v in invoice.client.items() if not str(k).startswith("_")}
+    fields.update(ctx.vars)
+    fields.update(client_id=safe_name(invoice.client_id), client_name=safe_name(invoice.client_name),
+                  seq=invoice.seq, invoice_no=safe_name(invoice.number))
+    return fields
+
+
 def _fmt_path(ctx, params, key, invoice, default):
-    template = str(params.get(key, default)).format(client_id=safe_name(invoice.client_id),
-                                                    client_name=safe_name(invoice.client_name), **ctx.vars)
+    try:
+        template = str(params.get(key, default)).format(**path_fields(invoice, ctx))
+    except KeyError as e:
+        raise BillingError(f"File name uses {{{e.args[0]}}}, which is not a column in the client list")
     if Path(template).is_absolute():
         return Path(template)
     return resolve_path(ctx.cfg, ctx.cfg.get("output_dir", "output")) / template
@@ -54,29 +65,63 @@ def pdf_output(invoice, params, ctx):
     return [path]
 
 
-def _replace_in_paragraph(par, mapping):
-    text = "".join(r.text for r in par.runs)
-    if "{{" not in text or not par.runs:
+_W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _own_texts(p_el):
+    """The w:t pieces that belong to this paragraph itself (not to text boxes nested inside it)."""
+    out = []
+    for t in p_el.iter(_W + "t"):
+        anc = t.getparent()
+        while anc is not None and anc.tag != _W + "p":
+            anc = anc.getparent()
+        if anc is p_el:
+            out.append(t)
+    return out
+
+
+def _replace_in_element(p_el, mapping):
+    """Replaces {{placeholders}} in one paragraph. Word often splits text into pieces with their own
+    formatting; the value goes into the piece where the placeholder starts, so every other piece keeps its look."""
+    texts = _own_texts(p_el)
+    full = "".join(t.text or "" for t in texts)
+    if "{{" not in full:
         return
-    for k, v in mapping.items():
-        text = text.replace("{{" + k + "}}", v)
-    par.runs[0].text = text
-    for r in par.runs[1:]:
-        r.text = ""
+    import re
+    starts, pos = [], 0
+    for t in texts:
+        starts.append(pos)
+        pos += len(t.text or "")
+    for m in reversed(list(re.finditer(r"\{\{([A-Za-z0-9_]+)\}\}", full))):
+        if m.group(1) not in mapping:
+            continue
+        a, b = m.span()
+        first = max(i for i, st in enumerate(starts) if st <= a)
+        for i in range(len(texts) - 1, first - 1, -1):
+            st, txt = starts[i], texts[i].text or ""
+            end = st + len(txt)
+            if end <= a or st >= b:
+                continue
+            lo, hi = max(a, st) - st, min(b, end) - st
+            repl = str(mapping[m.group(1)]) if i == first else ""
+            texts[i].text = txt[:lo] + repl + txt[hi:]
+            texts[i].set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+
+
+def _replace_in_paragraph(par, mapping):
+    _replace_in_element(par._p, mapping)
 
 
 def _replace_everywhere(doc, mapping):
-    def walk(pars, tables):
-        for p in pars:
-            _replace_in_paragraph(p, mapping)
-        for t in tables:
-            for row in t.rows:
-                for cell in row.cells:
-                    walk(cell.paragraphs, cell.tables)
-    walk(doc.paragraphs, doc.tables)
+    """Body, tables, text boxes, headers and footers."""
+    parts = [doc.element.body]
     for s in doc.sections:
-        walk(s.header.paragraphs, s.header.tables)
-        walk(s.footer.paragraphs, s.footer.tables)
+        for hf in (s.header, s.footer, s.first_page_header, s.first_page_footer, s.even_page_header, s.even_page_footer):
+            if not hf.is_linked_to_previous:
+                parts.append(hf._element)
+    for part in parts:
+        for p_el in list(part.iter(_W + "p")):
+            _replace_in_element(p_el, mapping)
 
 
 @output("docx")
@@ -91,7 +136,10 @@ def docx_output(invoice, params, ctx):
     company = ctx.cfg["company"]
     mapping = {"company": company["name"], "client_name": invoice.client_name, "invoice_no": invoice.number,
                "date": f"{invoice.issue_date:%B %d, %Y}", "period": invoice.period,
+               "date_long": f"{invoice.issue_date:%B} {invoice.issue_date.day}, {invoice.issue_date.year}",
+               "period_name": ctx.vars["period_name"], "seq": str(invoice.seq),
                "total": f"{company.get('currency', '')} {_money(invoice.total)}".strip(),
+               "total_amount": _money(invoice.total), "subtotal": _money(invoice.total),
                "payment_terms": str(company.get("payment_terms", ""))}
     mapping.update({f"client_{k}": v for k, v in invoice.client.items() if not k.startswith("_")})
     for table in doc.tables:
@@ -116,9 +164,8 @@ def docx_output(invoice, params, ctx):
 
 
 def _replace_everywhere_row(row, mapping):
-    for cell in row.cells:
-        for p in cell.paragraphs:
-            _replace_in_paragraph(p, mapping)
+    for p_el in list(row._tr.iter(_W + "p")):
+        _replace_in_element(p_el, mapping)
 
 
 @output("ledger_csv")

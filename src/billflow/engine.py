@@ -8,7 +8,7 @@ from pathlib import Path
 from . import connectors  # noqa: F401
 from .config import ConfigError, parse_period, period_vars, resolve_path, safe_name
 from .models import BillingError, Invoice
-from .registry import OUTPUTS, RULES, SOURCES
+from .registry import CHECKS, OUTPUTS, RULES, SOURCES
 
 
 @dataclass
@@ -38,21 +38,24 @@ class Context:
     def source_key(self, name):
         return self._src_cfg(name).get("key", "id")
 
-    def source_rows(self, name):
-        if name not in self._cache:
+    def source_rows(self, name, period=None):
+        """Rows of a source for this run's month, or for another month (e.g. last month's readings)."""
+        period = period or self.period
+        key = (name, period)
+        if key not in self._cache:
             sc = self._src_cfg(name)
             try:
                 fn = SOURCES[sc["type"]]
             except KeyError:
                 raise ConfigError(f"Unknown source type '{sc.get('type')}'")
             try:
-                self._cache[name] = fn(sc, self)
+                self._cache[key] = fn(sc, self if period == self.period else Context(self.cfg, period))
             except BillingError:
-                if sc.get("optional"):
-                    self._cache[name] = []
+                if sc.get("optional") and period == self.period:
+                    self._cache[key] = []
                 else:
                     raise
-        return self._cache[name]
+        return self._cache[key]
 
 
 def load_plugins(cfg):
@@ -121,6 +124,10 @@ def plan(cfg, period, only=None, force=False):
                 last = int(row.get(lc) or 0) if lc else 0
             seq = int(last) + 1
             inv = Invoice(row, cid, name, f"{cid}/{seq}", seq, _issue_date(period), period, lines)
+            for out in cfg["outputs"]:
+                check = CHECKS.get(out.get("type"))
+                if check:
+                    check(inv, out, ctx)
             results.append(Result(cid, name, "OK", inv))
         except BillingError as e:
             results.append(Result(cid, name, "ERROR", message=str(e)))
