@@ -1,5 +1,6 @@
 import calendar
 import re
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -32,7 +33,18 @@ def parse_period(period):
 
 def period_vars(period):
     year, month = parse_period(period)
-    return {"period": period, "year": year, "month": f"{month:02d}", "month_name": calendar.month_name[month]}
+    return {"period": period, "year": year, "month": f"{month:02d}", "month_name": calendar.month_name[month],
+            "period_name": f"{calendar.month_name[month]} {year}"}
+
+
+def previous_period(period):
+    year, month = parse_period(period)
+    return f"{year - (month == 1)}-{12 if month == 1 else month - 1:02d}"
+
+
+def period_end(period):
+    year, month = parse_period(period)
+    return date(year, month, calendar.monthrange(year, month)[1])
 
 
 def safe_name(text):

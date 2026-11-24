@@ -3,6 +3,7 @@
 SOURCES = {}   # name -> fn(params, ctx) -> list[dict]      (where data comes from)
 RULES = {}     # name -> fn(client, params, ctx) -> list[Line]  (how a charge is calculated)
 OUTPUTS = {}   # name -> fn(invoice, params, ctx) -> list[path]  (what gets produced)
+CHECKS = {}    # output name -> fn(invoice, params, ctx); raises BillingError during the preview, before anything is written
 
 
 def _register(table, name):
@@ -22,3 +23,7 @@ def rule(name):
 
 def output(name):
     return _register(OUTPUTS, name)
+
+
+def output_check(name):
+    return _register(CHECKS, name)

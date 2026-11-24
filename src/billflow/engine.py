@@ -3,12 +3,13 @@ import importlib.util
 import json
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
-from . import connectors  # noqa: F401
+from . import connectors, payments  # noqa: F401
 from .config import ConfigError, parse_period, period_vars, resolve_path, safe_name
 from .models import BillingError, Invoice
-from .registry import OUTPUTS, RULES, SOURCES
+from .registry import CHECKS, OUTPUTS, RULES, SOURCES
 
 
 @dataclass
@@ -38,21 +39,24 @@ class Context:
     def source_key(self, name):
         return self._src_cfg(name).get("key", "id")
 
-    def source_rows(self, name):
-        if name not in self._cache:
+    def source_rows(self, name, period=None):
+        """Rows of a source for this run's month, or for another month (e.g. last month's readings)."""
+        period = period or self.period
+        key = (name, period)
+        if key not in self._cache:
             sc = self._src_cfg(name)
             try:
                 fn = SOURCES[sc["type"]]
             except KeyError:
                 raise ConfigError(f"Unknown source type '{sc.get('type')}'")
             try:
-                self._cache[name] = fn(sc, self)
+                self._cache[key] = fn(sc, self if period == self.period else Context(self.cfg, period))
             except BillingError:
-                if sc.get("optional"):
-                    self._cache[name] = []
+                if sc.get("optional") and period == self.period:
+                    self._cache[key] = []
                 else:
                     raise
-        return self._cache[name]
+        return self._cache[key]
 
 
 def load_plugins(cfg):
@@ -121,9 +125,26 @@ def plan(cfg, period, only=None, force=False):
                 last = int(row.get(lc) or 0) if lc else 0
             seq = int(last) + 1
             inv = Invoice(row, cid, name, f"{cid}/{seq}", seq, _issue_date(period), period, lines)
-            results.append(Result(cid, name, "OK", inv))
+            if payments.enabled(cfg):
+                inv.payments = payments.client_payments(cfg, ctx, cid)
+            notes = []
+            if inv.payments:
+                paid = sum((p.amount for p in inv.payments), Decimal(0))
+                notes.append(f"{len(inv.payments)} payment(s) received: {paid:,.2f}")
+            for out in cfg["outputs"]:
+                check = CHECKS.get(out.get("type"))
+                if check:
+                    notes += check(inv, out, ctx) or []
+            results.append(Result(cid, name, "OK", inv, "; ".join(notes)))
         except BillingError as e:
             results.append(Result(cid, name, "ERROR", message=str(e)))
+    if payments.enabled(cfg) and not only:
+        try:
+            for cid, amt in payments.unknown_clients(cfg, ctx, seen):
+                results.append(Result(cid, "(not in client list)", "ERROR",
+                                      message=f"Payments of {amt:,.2f} for unit {cid}, which is not in the client list"))
+        except BillingError:
+            pass  # the payments file itself could not be read: every client already reports why
     return results
 
 
@@ -154,8 +175,14 @@ def commit(cfg, period, results):
     summary.parent.mkdir(parents=True, exist_ok=True)
     with open(summary, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
-        w.writerow(["Client", "Name", "Status", "Invoice", "Total", "Notes"])
+        w.writerow(["Client", "Name", "Status", "Invoice", "Total", "Notes", "Paid", "Balance after", "Notice"])
         for r in results:
+            inv = r.invoice if r.status == "OK" else None
             w.writerow([r.client_id, r.client_name, r.status, r.invoice.number if r.invoice else "",
-                        f"{r.invoice.total:.2f}" if r.invoice else "", r.message])
+                        f"{r.invoice.total:.2f}" if r.invoice else "", r.message,
+                        f"{sum(p.amount for p in inv.payments):.2f}" if inv and inv.payments else "",
+                        f"{inv.balance:.2f}" if inv and inv.balance is not None else "",
+                        "yes" if inv and inv.notice_due else ""])
+    from .report import write_workbook
+    write_workbook(summary.with_suffix(".xlsx"), cfg, period, results)
     return summary

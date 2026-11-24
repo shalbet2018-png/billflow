@@ -859,6 +859,8 @@ class App:
                     self.say(f"Done - {plural(done, 'invoice')} saved for {month_label(key[1])}.", "head")
                     folder = Path(summary).parent
                     self._link(f"Open the {month_label(key[1])} results folder", folder)
+                    if Path(summary).with_suffix(".xlsx").exists():
+                        self._link(f"Open the {month_label(key[1])} summary (Excel)", Path(summary).with_suffix(".xlsx"))
                     for r in failed:
                         e = explain(r.message, cfg, key[1], r.client_id)
                         self.say(f"  • {r.client_id}  {r.client_name}: {e.text}", "error")

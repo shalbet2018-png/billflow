@@ -11,6 +11,25 @@ def _client_rows(ctx, params, client):
     return rows
 
 
+def _blank(v):
+    return v is None or str(v).strip() == ""
+
+
+def _last_month_reading(client, params, ctx):
+    """The previous reading is last month's current reading, taken from last month's file of the same source."""
+    from ..config import previous_period
+    last = previous_period(ctx.period)
+    try:
+        rows = ctx.source_rows(params["source"], last)
+    except BillingError as e:
+        raise BillingError(f"No previous {params['name']} reading: last month's ({last}) readings could not be read - {e}")
+    key = ctx.source_key(params["source"])
+    mine = [r for r in rows if r.get(key, "").strip() == client["_id"]]
+    if not mine or _blank(mine[0].get(params["current_column"])):
+        raise BillingError(f"No previous {params['name']} reading: {client['_id']} has no reading in last month's ({last}) file")
+    return to_money(mine[0].get(params["current_column"]), f"last month's {params['name']} reading")
+
+
 @rule("fixed")
 def fixed(client, params, ctx):
     """A flat amount per client, e.g. a service charge held in the client list."""
@@ -32,8 +51,14 @@ def metered(client, params, ctx):
     if len(rows) > 1:
         raise BillingError(f"{len(rows)} '{params['source']}' rows found for {client['_id']} - expected one")
     row = rows[0]
+    if _blank(row.get(params["current_column"])) and not params.get("required", True):
+        return []  # this client has no such meter (e.g. no electricity sub-meter)
     cur = to_money(row.get(params["current_column"]), "current reading")
-    prev = to_money(row.get(params["previous_column"]), "previous reading")
+    prev_value = row.get(params["previous_column"]) if params.get("previous_column") else None
+    if _blank(prev_value) and params.get("previous_from_last_month"):
+        prev = _last_month_reading(client, params, ctx)
+    else:
+        prev = to_money(prev_value, "previous reading")
     if cur < prev:
         raise BillingError(f"Reading went down ({prev} -> {cur})")
     if "rate_column" in params:
