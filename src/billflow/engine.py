@@ -3,9 +3,10 @@ import importlib.util
 import json
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
-from . import connectors  # noqa: F401
+from . import connectors, payments  # noqa: F401
 from .config import ConfigError, parse_period, period_vars, resolve_path, safe_name
 from .models import BillingError, Invoice
 from .registry import CHECKS, OUTPUTS, RULES, SOURCES
@@ -124,13 +125,26 @@ def plan(cfg, period, only=None, force=False):
                 last = int(row.get(lc) or 0) if lc else 0
             seq = int(last) + 1
             inv = Invoice(row, cid, name, f"{cid}/{seq}", seq, _issue_date(period), period, lines)
+            if payments.enabled(cfg):
+                inv.payments = payments.client_payments(cfg, ctx, cid)
+            notes = []
             for out in cfg["outputs"]:
                 check = CHECKS.get(out.get("type"))
                 if check:
-                    check(inv, out, ctx)
-            results.append(Result(cid, name, "OK", inv))
+                    notes += check(inv, out, ctx) or []
+            if inv.payments and not notes:
+                paid = sum((p.amount for p in inv.payments), Decimal(0))
+                notes.append(f"{len(inv.payments)} payment(s) received: {paid:,.2f}")
+            results.append(Result(cid, name, "OK", inv, "; ".join(notes)))
         except BillingError as e:
             results.append(Result(cid, name, "ERROR", message=str(e)))
+    if payments.enabled(cfg) and not only:
+        try:
+            for cid, amt in payments.unknown_clients(cfg, ctx, seen):
+                results.append(Result(cid, "(not in client list)", "ERROR",
+                                      message=f"Payments of {amt:,.2f} for unit {cid}, which is not in the client list"))
+        except BillingError:
+            pass  # the payments file itself could not be read: every client already reports why
     return results
 
 

@@ -55,7 +55,7 @@ def insert_rows_keep_layout(ws, at, by=1):
 
 
 def _cols(params):
-    names = {"date": "A", "reference": "B", "debit": "D", "credit": "E", "balance": "F"}
+    names = {"date": "A", "reference": "B", "deposit_by": "C", "debit": "D", "credit": "E", "balance": "F"}
     return {k: str(params.get(f"{k}_column", d)).upper() for k, d in names.items()}
 
 
@@ -91,43 +91,65 @@ def _open(invoice, params, ctx):
         raise BillingError(f"{path.name}: could not find the row starting "
                            f"'{params.get('total_marker', 'Total must equal')}' (the end of the statement)")
     ref = _reference(invoice, params)
-    for r in range(1, total_row):
-        if _norm(ws[f"{cols['reference']}{r}"].value) == _norm(ref):
-            raise BillingError(f"{path.name} already has a row for {ref}")
-    return path, wb, ws, cols, total_row, ref
+    existing = {_norm(ws[f"{cols['reference']}{r}"].value) for r in range(1, total_row)}
+    if _norm(ref) in existing:
+        raise BillingError(f"{path.name} already has a row for {ref}")
+    return path, wb, ws, cols, total_row, ref, existing
+
+
+def _entries(invoice, params, ref, existing):
+    """The rows to add, in date order (on the same day the invoice comes first), and payments already listed."""
+    when = period_end(invoice.period) if params.get("date", "period_end") == "period_end" else invoice.issue_date
+    rows = [(when, 0, ref, "", invoice.total, None)]
+    already = []
+    for p in invoice.payments:
+        if _norm(p.reference) in existing:
+            already.append(p.reference)
+        else:
+            rows.append((p.date, 1, p.reference, p.deposit_by, None, p.amount))
+    return sorted(rows, key=lambda e: (e[0], e[1])), already
 
 
 @output_check("statement_xlsx")
 def check_statement(invoice, params, ctx):
-    _open(invoice, params, ctx)
+    path, wb, ws, cols, total_row, ref, existing = _open(invoice, params, ctx)
+    _, already = _entries(invoice, params, ref, existing)
+    if already:
+        return [f"already on the statement, not added again: {', '.join(already)}"]
+    return []
 
 
 @output("statement_xlsx")
 def statement_xlsx(invoice, params, ctx):
-    path, wb, ws, cols, total_row, ref = _open(invoice, params, ctx)
+    path, wb, ws, cols, total_row, ref, existing = _open(invoice, params, ctx)
+    entries, _ = _entries(invoice, params, ref, existing)
     backup = resolve_path(ctx.cfg, ctx.cfg.get("output_dir", "output")) / ctx.period / "statement-backups" / path.name
     backup.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(path, backup)
 
-    last, new = total_row - 1, total_row
-    insert_rows_keep_layout(ws, total_row, 1)
-    for ci in range(1, ws.max_column + 1):
-        src, dst = ws.cell(last, ci), ws.cell(new, ci)
-        if src.has_style:
-            dst._style = copy(src._style)
-    ws.row_dimensions[new].height = ws.row_dimensions[last].height
-    when = datetime.combine(period_end(invoice.period) if params.get("date", "period_end") == "period_end"
-                            else invoice.issue_date, datetime.min.time())
-    ws[f"{cols['date']}{new}"] = when
-    ws[f"{cols['reference']}{new}"] = ref
-    ws[f"{cols['debit']}{new}"] = float(invoice.total)
+    last, n = total_row - 1, len(entries)
+    insert_rows_keep_layout(ws, total_row, n)
     bal, deb, cre = cols["balance"], cols["debit"], cols["credit"]
-    ws[f"{bal}{new}"] = f"={bal}{last}+{deb}{new}-{cre}{new}"
-    total_cell = ws[f"{bal}{new + 1}"]
+    for i, (when, _, reference, deposit_by, debit, credit) in enumerate(entries):
+        r = total_row + i
+        for ci in range(1, ws.max_column + 1):
+            src = ws.cell(last, ci)
+            if src.has_style:
+                ws.cell(r, ci)._style = copy(src._style)
+        ws.row_dimensions[r].height = ws.row_dimensions[last].height
+        ws[f"{cols['date']}{r}"] = datetime.combine(when, datetime.min.time())
+        ws[f"{cols['reference']}{r}"] = reference
+        if deposit_by:
+            ws[f"{cols['deposit_by']}{r}"] = deposit_by
+        if debit is not None:
+            ws[f"{deb}{r}"] = float(debit)
+        if credit is not None:
+            ws[f"{cre}{r}"] = float(credit)
+        ws[f"{bal}{r}"] = f"={bal}{r - 1}+{deb}{r}-{cre}{r}"
+    total_cell = ws[f"{bal}{total_row + n}"]
     if _norm(total_cell.value) == _norm(f"={bal}{last}"):
-        total_cell.value = f"={bal}{new}"
+        total_cell.value = f"={bal}{total_row + n - 1}"
     if params.get("as_at_cell"):
         ws[params["as_at_cell"]] = datetime.combine(period_end(invoice.period), datetime.min.time())
     wb.save(path)
     return [path]
-

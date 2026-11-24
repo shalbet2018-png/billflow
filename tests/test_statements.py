@@ -192,3 +192,67 @@ def test_office_pdf_makes_pdfs_with_word_and_excel(estate):
     except BillingError as e:
         pytest.skip(f"Microsoft Word not available: {e}")
     assert Path(out).read_bytes()[:4] == b"%PDF"
+
+
+# ---------------------------------------------------------------- payments
+
+def _with_payments(estate, rows):
+    cfg = (estate / "config.yml").read_text(encoding="utf-8").replace(
+        "charges:", "  payments: {type: csv, path: \"payments-{period}.csv\", key: id}\n"
+        "payments: {source: payments}\ncharges:", 1)
+    (estate / "config.yml").write_text(cfg, encoding="utf-8")
+    (estate / "payments-2026-11.csv").write_text("id,date,reference,amount,deposit_by\n" + rows, encoding="utf-8")
+
+
+def test_payments_go_into_the_statement_in_date_order_with_the_invoice(estate):
+    _with_payments(estate, "U1,20/11/2026,PMT#900 & P050/01,3000,Ann\nU1,2026-11-03,PMT#880 & P041/02,\"1,500\",\n")
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U1"].message == "2 payment(s) received: 4,500.00" and res["U2"].message == ""
+    assert _run(estate, "--yes") == 0
+    ws = load_workbook(estate / "units" / "Ann Demo_U1" / "Block - U1 - Ann Demo.xlsx").active
+    got = [[ws.cell(r, c).value for c in range(1, 7)] for r in (13, 14, 15)]
+    assert got[0] == [datetime(2026, 11, 3), "PMT#880 & P041/02", None, None, 1500, "=F12+D13-E13"]
+    assert got[1] == [datetime(2026, 11, 20), "PMT#900 & P050/01", "Ann", None, 3000, "=F13+D14-E14"]
+    assert got[2] == [datetime(2026, 11, 30), "Invoice U1/2", None, 8800, None, "=F14+D15-E15"]
+    assert str(ws["A16"].value).startswith("Total must equal") and ws["F16"].value == "=F15" and ws["F6"].value == "=F16"
+    assert ws["F18"].value == "=F4" and {str(m) for m in ws.merged_cells.ranges} == {"A16:D16", "A19:F19"}
+
+
+def test_payment_already_typed_into_the_statement_is_not_added_again(estate):
+    _with_payments(estate, "U1,2026-11-03,pmt#1,500\nU1,2026-11-04,PMT#2,700\n")
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U1"].status == "OK" and "not added again: pmt#1" in res["U1"].message
+    _run(estate, "--yes")
+    ws = load_workbook(estate / "units" / "Ann Demo_U1" / "Block - U1 - Ann Demo.xlsx").active
+    refs = [ws.cell(r, 2).value for r in range(11, 16)]
+    assert refs == ["Invoice U1/1", "PMT#1", "PMT#2", "Invoice U1/2", None]
+
+
+@pytest.mark.parametrize("row, problem", [
+    ("U1,2026-10-31,PMT#1,500", "outside November 2026"),
+    ("U1,2026-11-31,PMT#1,500", "not a real date"),
+    ("U1,next week,PMT#1,500", "not understood"),
+    ("U1,2026-11-05,,500", "has no reference"),
+    ("U1,2026-11-05,PMT#1,0", "must be more than 0"),
+    ("U1,2026-11-05,PMT#1,five", "not a number"),
+    ("U1,2026-11-05,PMT#1,500\nU1,2026-11-06,PMT #1,500", "listed twice"),
+])
+def test_bad_payments_stop_that_client_and_nothing_is_guessed(estate, row, problem):
+    _with_payments(estate, row + "\n")
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U1"].status == "ERROR" and problem in res["U1"].message
+    assert res["U2"].status == "OK"
+
+
+def test_payment_for_a_unit_not_in_the_client_list_is_reported(estate):
+    _with_payments(estate, "U9,2026-11-05,PMT#7,2500\nU9,2026-11-06,PMT#8,500\n")
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U9"].status == "ERROR" and "3,000.00" in res["U9"].message and "not in the client list" in res["U9"].message
+    assert res["U1"].status == res["U2"].status == "OK"
+
+
+def test_missing_payments_file_is_reported(estate):
+    _with_payments(estate, "")
+    (estate / "payments-2026-11.csv").unlink()
+    res = plan(load_config(estate / "config.yml"), "2026-11")
+    assert {r.status for r in res} == {"ERROR"} and all("payments-2026-11.csv" in r.message for r in res)

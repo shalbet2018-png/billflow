@@ -40,6 +40,7 @@ class Invoice:
     period: str
     lines: List[Line] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    payments: list = field(default_factory=list)   # payments.Payment received during the month
 
     @property
     def total(self) -> Decimal:
