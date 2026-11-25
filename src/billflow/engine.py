@@ -84,6 +84,27 @@ def _issue_date(period):
     return date(y + (m == 12), 1 if m == 12 else m + 1, 1)
 
 
+_YES = {"yes", "y", "true", "1", "x"}
+_NO = {"", "no", "n", "false", "0", "-"}
+
+
+def _skipped(charge, row):
+    """A charge with `skip_if: <column>` is left off for clients marked yes in that column of the client list
+    (e.g. service_only for units the tenant has bought, who pay the service charge only)."""
+    col = charge.get("skip_if")
+    if not col:
+        return False
+    if col not in row:
+        raise BillingError(f"The charge '{charge.get('name', charge['rule'])}' uses skip_if: {col}, "
+                           f"but the client list has no '{col}' column")
+    value = str(row.get(col) or "").strip().lower()
+    if value in _YES:
+        return True
+    if value in _NO:
+        return False
+    raise BillingError(f"'{col}' must be yes or empty, not {row.get(col)!r}")
+
+
 def plan(cfg, period, only=None, force=False):
     """Works everything out without writing a single file."""
     load_plugins(cfg)
@@ -116,6 +137,8 @@ def plan(cfg, period, only=None, force=False):
                 fn = RULES.get(ch["rule"])
                 if not fn:
                     raise ConfigError(f"Unknown charge rule '{ch['rule']}'")
+                if _skipped(ch, row):
+                    continue
                 lines += fn(client, ch, ctx)
             if not lines:
                 raise BillingError("No charges calculated")

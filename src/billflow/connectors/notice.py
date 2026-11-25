@@ -8,7 +8,7 @@ from decimal import Decimal
 from ..config import resolve_path
 from ..models import BillingError
 from ..registry import output, output_check
-from .outputs import _fmt_path, _replace_everywhere
+from .outputs import _fmt_path, _replace_everywhere, check_placeholders
 
 
 def arrears(invoice):
@@ -33,12 +33,26 @@ def _amount(x):
     return text[:-3] if text.endswith(".00") else text
 
 
+def _mapping(invoice, params, ctx, owed):
+    day = invoice.issue_date
+    deadline = day + timedelta(days=int(params.get("pay_within_days", 14)))
+    name = str(invoice.client_name).strip()
+    mapping = {"company": ctx.cfg["company"]["name"], "client_name": name, "client_name_upper": name.upper(),
+               "first_name": name.split()[0] if name else "", "client_id": invoice.client_id,
+               "notice_date": f"{_ordinal(day.day)} {day:%B %Y}".upper(),
+               "deadline": f"{_ordinal(deadline.day)} {deadline:%B %Y}",
+               "arrears": _amount(owed), "balance": _amount(invoice.balance), "period_name": ctx.vars["period_name"]}
+    mapping.update({f"client_{k}": str(v) for k, v in invoice.client.items() if not str(k).startswith("_")})
+    return mapping
+
+
 @output_check("notice_docx")
 def check_notice(invoice, params, ctx):
     template = resolve_path(ctx.cfg, params.get("template", ""))
     if not params.get("template") or not template.exists():
         raise BillingError(f"Notice template not found: {template}")
     owed = arrears(invoice)
+    check_placeholders(template, _mapping(invoice, params, ctx, owed))
     invoice.notice_due = owed > _limit(params)
     if invoice.notice_due:
         return [f"arrears {owed:,.2f}: notice will be written"]
@@ -52,15 +66,7 @@ def notice_docx(invoice, params, ctx):
     owed = arrears(invoice)
     if owed <= _limit(params):
         return []
-    day = invoice.issue_date
-    deadline = day + timedelta(days=int(params.get("pay_within_days", 14)))
-    name = str(invoice.client_name).strip()
-    mapping = {"company": ctx.cfg["company"]["name"], "client_name": name, "client_name_upper": name.upper(),
-               "first_name": name.split()[0] if name else "", "client_id": invoice.client_id,
-               "notice_date": f"{_ordinal(day.day)} {day:%B %Y}".upper(),
-               "deadline": f"{_ordinal(deadline.day)} {deadline:%B %Y}",
-               "arrears": _amount(owed), "balance": _amount(invoice.balance), "period_name": ctx.vars["period_name"]}
-    mapping.update({f"client_{k}": str(v) for k, v in invoice.client.items() if not str(k).startswith("_")})
+    mapping = _mapping(invoice, params, ctx, owed)
     doc = Document(str(resolve_path(ctx.cfg, params["template"])))
     _replace_everywhere(doc, mapping)
     path = _fmt_path(ctx, params, "path", invoice, "{period}/{client_id}/notice-{client_id}.docx")

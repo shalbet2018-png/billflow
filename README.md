@@ -38,6 +38,28 @@ Built-in rules: `fixed` (flat amount or client column), `metered` ((current - pr
 
 Word templates use `{{company}} {{client_name}} {{client_<column>}} {{invoice_no}} {{date}} {{period}} {{total}} {{payment_terms}}`
 and one table row containing `{{item}} {{description}} {{qty}} {{unit_price}} {{amount}}`, which is repeated per line.
+The preview stops a client if a template asks for a value BILLFLOW does not have (e.g. `{{client_phone}}` with no
+`phone` column), so a raw `{{...}}` is never printed.
+
+Any charge can be left off some clients with `skip_if: <column>`: clients with `yes` in that column of the client list
+skip it (e.g. `skip_if: service_only` on the water and electricity charges for units the tenant has bought, who pay
+the service charge only and need no readings).
+
+## Statements, payments and arrears notices
+
+For property managers who keep one Excel reconciliation statement per client:
+
+- `statement_xlsx` adds the month's invoice and payments above the "Total must equal" row (found in any column) and
+  backs the workbook up first. Columns are read from each statement's own heading row (Date, Reference, Deposit by,
+  Debit, Credit, Balance), so statements with different layouts work side by side; `date_column` ... `balance_column`
+  override them. `as_at_label: Reconciliation as at` updates the date next to that label on every statement
+  (`as_at_cell: F4` names a fixed cell instead).
+- `payments: {source: payments}` reads `payments-YYYY-MM.csv` (id, date, reference, amount, deposit_by). A payment
+  already on the statement (same reference **and** amount) is not added again; a reference reused for a different
+  amount is a new payment.
+- `notice_docx` writes an arrears notice from a Word template when the amount owed from earlier months is above
+  `arrears_above`.
+- `office_pdf` makes PDFs of the Word and Excel files with Microsoft Office (Windows).
 
 ## Email
 
