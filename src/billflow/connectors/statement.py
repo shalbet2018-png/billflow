@@ -112,9 +112,59 @@ def statement_balance(ws, total_row, balance_col="F"):
     return _cell_amount(ws, f"{balance_col}{balance_anchor(ws, total_row, balance_col)}", frozenset())
 
 
-def _cols(params):
-    names = {"date": "A", "reference": "B", "deposit_by": "C", "debit": "D", "credit": "E", "balance": "F"}
-    return {k: str(params.get(f"{k}_column", d)).upper() for k, d in names.items()}
+_DEFAULT_COLS = {"date": "A", "reference": "B", "deposit_by": "C", "debit": "D", "credit": "E", "balance": "F"}
+_HEADINGS = {"date": "date", "reference": "reference", "deposit_by": "depositby", "debit": "debit", "credit": "credit",
+             "balance": "balance"}
+
+
+def _heading_cols(ws, before_row):
+    """Columns read from the statement's own heading row (Date | Reference | Deposit by | Debit | Credit | Balance),
+    so a statement laid out differently from the others is still read correctly."""
+    from openpyxl.utils import get_column_letter
+    for r in range(1, before_row):
+        found = {}
+        for c in range(1, ws.max_column + 1):
+            text = _norm(ws.cell(r, c).value)
+            for key, word in _HEADINGS.items():
+                if text == word and key not in found:
+                    found[key] = get_column_letter(c)
+        if {"date", "reference", "debit", "credit", "balance"} <= set(found):
+            return found
+    return {}
+
+
+def _cols(params, ws=None, total_row=None):
+    """Statement columns: set in the config, else read from the heading row, else the usual A to F."""
+    found = _heading_cols(ws, total_row) if ws is not None and total_row else {}
+    return {k: str(params.get(f"{k}_column") or found.get(k) or d).upper() for k, d in _DEFAULT_COLS.items()}
+
+
+def _total_row(ws, marker):
+    """The row whose text starts with the marker ('Total must equal...'), in whichever column it was typed."""
+    for r in range(1, ws.max_row + 1):
+        for c in range(1, min(ws.max_column, 12) + 1):
+            if _norm(ws.cell(r, c).value).startswith(marker):
+                return r
+    return None
+
+
+def _as_at_cell(ws, params):
+    """Where the 'Reconciliation as at' date goes: the cell named in as_at_cell, or the date cell to the right
+    of the label named in as_at_label (found on each statement, since layouts differ)."""
+    from openpyxl.utils import get_column_letter
+    label = _norm(params.get("as_at_label", ""))
+    if label:
+        for r in range(1, min(ws.max_row, 40) + 1):
+            for c in range(1, ws.max_column + 1):
+                if _norm(ws.cell(r, c).value).startswith(label):
+                    right = [ws.cell(r, cc) for cc in range(c + 1, ws.max_column + 1)]
+                    dated = next((x for x in right if isinstance(x.value, datetime)), None)
+                    target = dated or next((x for x in right if x.value in (None, "")), None)
+                    if target is None:
+                        raise BillingError(f"no empty or date cell to the right of '{params['as_at_label']}'")
+                    return f"{get_column_letter(target.column)}{r}"
+        raise BillingError(f"could not find '{params['as_at_label']}' on the statement")
+    return params.get("as_at_cell")
 
 
 def _reference(invoice, params):
@@ -141,17 +191,26 @@ def _open(invoice, params, ctx):
     if sheet and sheet not in wb.sheetnames:
         raise BillingError(f"Sheet '{sheet}' not found in {path.name}")
     ws = wb[sheet] if sheet else wb.active
-    cols = _cols(params)
     marker = _norm(params.get("total_marker", "Total must equal"))
-    total_row = next((r for r in range(1, ws.max_row + 1)
-                      if _norm(ws[f"{cols['date']}{r}"].value).startswith(marker)), None)
+    total_row = _total_row(ws, marker)
     if total_row is None:
         raise BillingError(f"{path.name}: could not find the row starting "
                            f"'{params.get('total_marker', 'Total must equal')}' (the end of the statement)")
+    cols = _cols(params, ws, total_row)
     ref = _reference(invoice, params)
-    existing = {_norm(ws[f"{cols['reference']}{r}"].value) for r in range(1, total_row)}
-    if _norm(ref) in existing:
+    refs = {_norm(ws[f"{cols['reference']}{r}"].value) for r in range(1, total_row)}
+    if _norm(ref) in refs:
         raise BillingError(f"{path.name} already has a row for {ref}")
+    # payments already typed in: the same reference AND the same amount (references are sometimes reused)
+    existing = set()
+    for r in range(1, total_row):
+        credit = ws[f"{cols['credit']}{r}"].value
+        try:
+            amount = _plain_number(credit, f"{cols['credit']}{r}")
+        except BillingError:
+            continue
+        if amount:
+            existing.add((_norm(ws[f"{cols['reference']}{r}"].value), amount))
     return path, wb, ws, cols, total_row, ref, existing
 
 
@@ -161,7 +220,7 @@ def _entries(invoice, params, ref, existing):
     rows = [(when, 0, ref, "", invoice.total, None)]
     already = []
     for p in invoice.payments:
-        if _norm(p.reference) in existing:
+        if (_norm(p.reference), p.amount) in existing:
             already.append(p.reference)
         else:
             rows.append((p.date, 1, p.reference, p.deposit_by, None, p.amount))
@@ -176,6 +235,10 @@ def check_statement(invoice, params, ctx):
         before = statement_balance(ws, total_row, cols["balance"])
     except BillingError as e:
         raise BillingError(f"{path.name}: balance cannot be worked out - {e}")
+    try:
+        _as_at_cell(ws, params)
+    except BillingError as e:
+        raise BillingError(f"{path.name}: {e}")
     from decimal import Decimal
     # Excel keeps amounts as binary fractions (e.g. 23771.510000000002), so balances are rounded to cents
     invoice.balance = (before + sum((e[4] or 0) - (e[5] or 0) for e in entries)).quantize(Decimal("0.01"))
@@ -195,7 +258,18 @@ def statement_xlsx(invoice, params, ctx):
 
     last, n = total_row - 1, len(entries)
     anchor = balance_anchor(ws, total_row, cols["balance"])
+    as_at = _as_at_cell(ws, params)
+    # cells merged across columns on the row above (e.g. Debit spread over E:G) are merged the same way
+    from openpyxl.utils import column_index_from_string
+    written = {column_index_from_string(c) for c in cols.values()}
+    row_merges = [(mr.min_col, mr.max_col) for mr in ws.merged_cells.ranges
+                  if mr.min_row == mr.max_row == last and mr.max_col > mr.min_col
+                  and not any(mr.min_col < c <= mr.max_col for c in written)]
     insert_rows_keep_layout(ws, total_row, n)
+    if as_at:
+        m = re.fullmatch(r"([A-Za-z]+)(\d+)", as_at)
+        if m and int(m.group(2)) >= total_row:
+            as_at = f"{m.group(1)}{int(m.group(2)) + n}"
     bal, deb, cre = cols["balance"], cols["debit"], cols["credit"]
     for i, (when, _, reference, deposit_by, debit, credit) in enumerate(entries):
         r = total_row + i
@@ -203,6 +277,8 @@ def statement_xlsx(invoice, params, ctx):
             src = ws.cell(last, ci)
             if src.has_style:
                 ws.cell(r, ci)._style = copy(src._style)
+        for c1, c2 in row_merges:
+            ws.merge_cells(start_row=r, start_column=c1, end_row=r, end_column=c2)
         ws.row_dimensions[r].height = ws.row_dimensions[last].height
         ws[f"{cols['date']}{r}"] = datetime.combine(when, datetime.min.time())
         ws[f"{cols['reference']}{r}"] = reference
@@ -216,7 +292,7 @@ def statement_xlsx(invoice, params, ctx):
     total_cell = ws[f"{bal}{total_row + n}"]
     if _norm(total_cell.value) in (_norm(f"={bal}{last}"), _norm(f"={bal}{anchor}"), ""):
         total_cell.value = f"={bal}{total_row + n - 1}"
-    if params.get("as_at_cell"):
-        ws[params["as_at_cell"]] = datetime.combine(period_end(invoice.period), datetime.min.time())
+    if as_at:
+        ws[as_at] = datetime.combine(period_end(invoice.period), datetime.min.time())
     wb.save(path)
     return [path]

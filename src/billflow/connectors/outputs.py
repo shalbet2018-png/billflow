@@ -7,7 +7,7 @@ from docx.table import _Row
 
 from ..config import resolve_path, safe_name
 from ..models import BillingError
-from ..registry import output
+from ..registry import output, output_check
 
 
 def _money(v):
@@ -124,15 +124,38 @@ def _replace_everywhere(doc, mapping):
             _replace_in_element(p_el, mapping)
 
 
-@output("docx")
-def docx_output(invoice, params, ctx):
-    """Fills a Word template. {{placeholders}} are replaced; the table row holding {{item}} is repeated per line."""
-    from docx import Document
+_LINE_FIELDS = ("item", "description", "qty", "unit_price", "amount")
 
-    template = resolve_path(ctx.cfg, params["template"])
-    if not template.exists():
-        raise BillingError(f"Word template not found: {template}")
+
+def template_placeholders(template):
+    """Every {{name}} in a Word template: body, tables, text boxes, headers and footers."""
+    import re
+    from docx import Document
     doc = Document(str(template))
+    parts = [doc.element.body]
+    for s in doc.sections:
+        for hf in (s.header, s.footer, s.first_page_header, s.first_page_footer, s.even_page_header, s.even_page_footer):
+            if not hf.is_linked_to_previous:
+                parts.append(hf._element)
+    names = set()
+    for part in parts:
+        for p_el in part.iter(_W + "p"):
+            names.update(re.findall(r"\{\{([A-Za-z0-9_]+)\}\}", "".join(t.text or "" for t in _own_texts(p_el))))
+    return names
+
+
+def check_placeholders(template, mapping, extra=()):
+    """Stops before anything is written if the template asks for a value BILLFLOW does not have,
+    so a raw {{placeholder}} is never printed on a client's document."""
+    missing = sorted(template_placeholders(template) - set(mapping) - set(extra))
+    if missing:
+        cols = [m[len("client_"):] for m in missing if m.startswith("client_")]
+        hint = f" - add a column called {', '.join(repr(c) for c in cols)} to the client list" if cols else ""
+        raise BillingError(f"{template.name} uses {', '.join('{{' + m + '}}' for m in missing)}, "
+                           f"which BILLFLOW cannot fill{hint}")
+
+
+def invoice_mapping(invoice, ctx):
     company = ctx.cfg["company"]
     mapping = {"company": company["name"], "client_name": invoice.client_name, "invoice_no": invoice.number,
                "date": f"{invoice.issue_date:%B %d, %Y}", "period": invoice.period,
@@ -142,6 +165,28 @@ def docx_output(invoice, params, ctx):
                "total_amount": _money(invoice.total), "subtotal": _money(invoice.total),
                "payment_terms": str(company.get("payment_terms", ""))}
     mapping.update({f"client_{k}": v for k, v in invoice.client.items() if not k.startswith("_")})
+    return mapping
+
+
+@output_check("docx")
+def check_docx(invoice, params, ctx):
+    template = resolve_path(ctx.cfg, params.get("template", ""))
+    if not params.get("template") or not template.exists():
+        raise BillingError(f"Word template not found: {template}")
+    check_placeholders(template, invoice_mapping(invoice, ctx), _LINE_FIELDS)
+    return []
+
+
+@output("docx")
+def docx_output(invoice, params, ctx):
+    """Fills a Word template. {{placeholders}} are replaced; the table row holding {{item}} is repeated per line."""
+    from docx import Document
+
+    template = resolve_path(ctx.cfg, params["template"])
+    if not template.exists():
+        raise BillingError(f"Word template not found: {template}")
+    doc = Document(str(template))
+    mapping = invoice_mapping(invoice, ctx)
     for table in doc.tables:
         for ri, row in enumerate(table.rows):
             if any("{{item}}" in c.text or "{{amount}}" in c.text for c in row.cells):

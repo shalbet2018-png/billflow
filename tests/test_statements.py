@@ -381,3 +381,103 @@ def test_fractions_of_a_cent_in_old_statement_figures_do_not_count_as_arrears(es
     res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
     assert res["U1"].invoice.balance == Decimal("8800.00") and not res["U1"].invoice.notice_due
     assert "notice" not in res["U1"].message
+
+
+# ---------------------------------------------------------------- lessons from the real Moke statements
+
+def _moved_layout(path):
+    """A statement laid out like one real one: Deposit by in D, Debit over E:G, Credit in H, Balance over I:J,
+    the 'as at' date in J4 and 'Total must equal' typed in column B."""
+    wb = Workbook()
+    ws = wb.active
+    ws["C4"], ws["F4"], ws["G4"], ws["J4"] = "Phone:", "-", "Reconciliation as at:", datetime(2026, 10, 31)
+    ws["G6"], ws["J6"] = "BALANCE:", "=I13"
+    for col, v in zip("ABDEHI", ["Date", "Reference", "Deposit by", "Debit", "Credit", "Balance"]):
+        ws[f"{col}10"] = v
+    ws["A11"], ws["B11"], ws["E11"], ws["I11"] = datetime(2026, 9, 30), "Invoice U1/1", 1500, 1500
+    ws["A12"], ws["B12"], ws["D12"], ws["H12"], ws["I12"] = datetime(2026, 10, 5), "PMT#1", "Ann", 500, "=I11+E12-H12"
+    for r in (11, 12):
+        ws.merge_cells(f"E{r}:G{r}")
+        ws.merge_cells(f"I{r}:J{r}")
+    ws["B13"], ws["H13"], ws["I13"] = "Total must equal the General Ledger Balance above:", "Total:", "=I12"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(path)
+
+
+def test_statement_with_its_own_column_layout_is_read_from_its_heading_row(estate):
+    cfg = (estate / "config.yml").read_text(encoding="utf-8").replace("as_at_cell: F4", "as_at_label: Reconciliation as at")
+    (estate / "config.yml").write_text(cfg, encoding="utf-8")
+    p = estate / "units" / "Ann Demo_U1" / "Block - U1 - Ann Demo.xlsx"
+    _moved_layout(p)
+    _with_payments(estate, "U1,2026-11-03,PMT#2,300,Ann\n")
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U1"].status == "OK" and res["U1"].invoice.balance == Decimal(1000 - 300 + 8800)
+    assert res["U2"].status == "OK"                     # the usual A-F layout still works next to it
+    assert _run(estate, "--yes") == 0
+    ws = load_workbook(p).active
+    assert [ws[f"{c}13"].value for c in "ABDEHI"] == [datetime(2026, 11, 3), "PMT#2", "Ann", None, 300, "=I12+E13-H13"]
+    assert [ws[f"{c}14"].value for c in "ABEHI"] == [datetime(2026, 11, 30), "Invoice U1/2", 8800, None, "=I13+E14-H14"]
+    assert str(ws["B15"].value).startswith("Total must equal") and ws["I15"].value == "=I14" and ws["J6"].value == "=I15"
+    assert ws["J4"].value == datetime(2026, 11, 30) and ws["F4"].value == "-"      # phone cell untouched
+    assert {"E13:G13", "I13:J13", "E14:G14", "I14:J14"} <= {str(m) for m in ws.merged_cells.ranges}
+
+
+def test_total_row_typed_in_another_column_is_found(estate):
+    p = estate / "units" / "Ann Demo_U1" / "Block - U1 - Ann Demo.xlsx"
+    wb = load_workbook(p)
+    ws = wb.active
+    ws.unmerge_cells("A13:D13")
+    ws["B13"], ws["A13"] = ws["A13"].value, None
+    wb.save(p)
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U1"].status == "OK" and res["U1"].invoice.balance == Decimal(9800)
+
+
+def test_reused_payment_reference_with_a_different_amount_is_a_new_payment(estate):
+    # PMT#1 (500) is already on the statement; the same reference was used again for a new payment of 700
+    _with_payments(estate, "U1,2026-11-03,PMT#1,700\n")
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U1"].status == "OK" and "not added again" not in res["U1"].message
+    assert res["U1"].invoice.balance == Decimal(1000 - 700 + 8800)
+    # and in this month's file the same reference may appear twice when the amounts differ
+    (estate / "payments-2026-11.csv").write_text("id,date,reference,amount,deposit_by\n"
+                                                 "U1,2026-11-03,PMT#5,700,\nU1,2026-11-09,PMT#5,800,\n", encoding="utf-8")
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U1"].status == "OK" and res["U1"].invoice.balance == Decimal(1000 - 1500 + 8800)
+
+
+def test_template_value_with_no_column_stops_before_anything_is_written(estate):
+    doc = Document(str(estate / "template.docx"))
+    doc.add_paragraph("Phone: {{client_phone}}  Email: {{client_email}}")
+    doc.save(str(estate / "template.docx"))
+    res = plan(load_config(estate / "config.yml"), "2026-11")
+    assert {r.status for r in res} == {"ERROR"}
+    assert res[0].message == ("template.docx uses {{client_email}}, {{client_phone}}, which BILLFLOW cannot fill "
+                              "- add a column called 'email', 'phone' to the client list")
+    from billflow.friendly import explain
+    assert "Nothing was written" in explain(res[0].message).text
+    clients = (estate / "clients.csv").read_text(encoding="utf-8").splitlines()
+    rows = [clients[0] + ",phone,email"] + [line + ",-,-" for line in clients[1:]]
+    (estate / "clients.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    assert {r.status for r in plan(load_config(estate / "config.yml"), "2026-11")} == {"OK"}
+
+
+def test_bought_unit_pays_the_service_charge_only(estate):
+    cfg = (estate / "config.yml").read_text(encoding="utf-8")
+    cfg = cfg.replace("rate_column: water_rate}", "rate_column: water_rate, skip_if: service_only}")
+    cfg = cfg.replace("rate_column: power_rate, required: false}", "rate_column: power_rate, required: false, skip_if: service_only}")
+    (estate / "config.yml").write_text(cfg, encoding="utf-8")
+    clients = (estate / "clients.csv").read_text(encoding="utf-8").splitlines()
+    (estate / "clients.csv").write_text("\n".join([clients[0] + ",service_only", clients[1] + ",yes", clients[2] + ","]) + "\n",
+                                        encoding="utf-8")
+    # the bought unit has no readings at all
+    for f in ("readings-2026-10.csv", "readings-2026-11.csv"):
+        lines = (estate / f).read_text(encoding="utf-8").splitlines()
+        (estate / f).write_text("\n".join(l for l in lines if not l.startswith("U1,")) + "\n", encoding="utf-8")
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert [l.item for l in res["U1"].invoice.lines] == ["Service Charge"] and res["U1"].invoice.total == 4000
+    assert [l.item for l in res["U2"].invoice.lines] == ["Service Charge", "Water Bill"]
+    (estate / "clients.csv").write_text("\n".join([clients[0] + ",service_only", clients[1] + ",maybe", clients[2] + ","]) + "\n",
+                                        encoding="utf-8")
+    res = {r.client_id: r for r in plan(load_config(estate / "config.yml"), "2026-11")}
+    assert res["U1"].status == "ERROR" and "'service_only' must be yes or empty" in res["U1"].message

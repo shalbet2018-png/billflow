@@ -166,6 +166,33 @@ def explain(message, cfg=None, period="", client_id=""):
                            "Open the statement and check the Balance column above the 'Total must equal' row, "
                            "then press Check invoices again.")
 
+    m = re.fullmatch(r"(.+\.docx) uses (.+), which BILLFLOW cannot fill(?: - add a column called (.+) to the client list)?", msg)
+    if m:
+        fix = (f"Add a column called {m.group(3)} to your client list (type - where there is nothing), "
+               "save it, then press Check invoices again." if m.group(3) else
+               "Remove or correct that {{...}} in the Word template, then press Check invoices again.")
+        return Explanation(f"The template {m.group(1)} has {m.group(2)}, which BILLFLOW has no value for. "
+                           "Nothing was written, so no document shows a raw {{...}}.", fix,
+                           _client_file(cfg, period) if m.group(3) else "")
+
+    m = re.fullmatch(r"The charge '(.+)' uses skip_if: (.+), but the client list has no '(.+)' column", msg)
+    if m:
+        return Explanation(f"The {m.group(1)} is set to be left off some units using a '{m.group(3)}' column, "
+                           "but your client list has no such column.",
+                           f"Add a '{m.group(3)}' column to the client list: yes for units that pay the service charge "
+                           "only, empty for the rest.", _client_file(cfg, period))
+
+    m = re.fullmatch(r"'(.+)' must be yes or empty, not (.+)", msg)
+    if m:
+        return Explanation(f"The '{m.group(1)}' column for {who} says {m.group(2)}.",
+                           f"Type yes in '{m.group(1)}' for a unit that pays the service charge only, or leave it empty.",
+                           _client_file(cfg, period))
+
+    m = re.fullmatch(r"(.+\.xlsx): could not find '(.+)' on the statement", msg)
+    if m:
+        return Explanation(f"{who}'s statement ({m.group(1)}) has no '{m.group(2)}' label, so the date cannot be updated.",
+                           "Open the statement and check the label at the top, then press Check invoices again.")
+
     m = re.fullmatch(r"No previous (.+) reading: (.+)", msg)
     if m:
         return Explanation(f"Last month's {m.group(1)} reading for {who} is missing ({m.group(2)}).",

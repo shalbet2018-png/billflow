@@ -2,7 +2,7 @@
 written into each client's statement together with the month's invoice.
 
 Every payment is checked before anything is written: a missing or unreadable date, amount or reference,
-a payment dated outside the month, a reference listed twice, or a payment for a unit that is not in the
+a payment dated outside the month, the same payment listed twice, or a payment for a unit that is not in the
 client list is reported, never guessed or dropped."""
 import re
 from dataclasses import dataclass
@@ -73,7 +73,8 @@ def client_payments(cfg, ctx, client_id):
         amount = to_money(r.get(s["amount"]), f"amount of payment {ref}")
         if amount <= 0:
             raise BillingError(f"Payment {ref} has amount {amount} - it must be more than 0")
-        norm = re.sub(r"\s+", "", ref).lower()
+        # the same receipt typed twice (references alone are sometimes reused for different payments)
+        norm = (re.sub(r"\s+", "", ref).lower(), amount)
         if norm in refs:
             raise BillingError(f"Payment {ref} is listed twice")
         refs.add(norm)
